@@ -6,3 +6,6 @@ Thumbs.db
 .gomodcache/
 *.o
 *.ll
+
+# generated eBPF bindings (produced by `go generate` / bpf2go)
+internal/bpf/bpf_*.go
