@@ -3,14 +3,14 @@
 # NetworkDoctor node agent image.
 #
 # Multi-stage build:
-#   - build stage: eBPF toolchain (clang/llvm/libbpf/bpftool) + Go.
+#   - build stage: eBPF toolchain (clang/llvm/libbpf) + Go.
 #     Runs `go generate` (bpf2go compiles networkdoctor.bpf.c and emits the
 #     Go bindings that //go:embed the compiled eBPF object), then builds a
 #     static Go binary with the eBPF bytecode embedded.
 #   - runtime stage: distroless/static, carries only the binary.
 #
-# The build expects bpf/vmlinux.h to already exist in the build context.
-# CI generates it on the Linux runner if it is not committed to the repo.
+# bpf/vmlinux.h is committed to the repo (a pinned CO-RE compile input), so no
+# bpftool / BTF dump is needed here.
 
 FROM golang:1.23-bookworm AS build
 
@@ -19,7 +19,6 @@ RUN apt-get update \
         clang \
         llvm \
         libbpf-dev \
-        bpftool \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -29,12 +28,6 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-
-# bpf/vmlinux.h must be present in the context. As a fallback (e.g. local
-# `docker build` on a Linux host), derive it from the host BTF if missing.
-RUN if [ ! -f bpf/vmlinux.h ]; then \
-        bpftool btf dump file /sys/kernel/btf/vmlinux format c > bpf/vmlinux.h; \
-    fi
 
 # Generate eBPF Go bindings (bpf2go) and build a static binary.
 RUN go generate ./...

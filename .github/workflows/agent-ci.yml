@@ -3,30 +3,41 @@ name: agent-ci
 # PR / main validation for the node agent (eBPF + Go).
 # Everything here needs a Linux runner: the Go packages are //go:build linux
 # gated and the eBPF program is compiled with clang.
+#
+# The workflow triggers on every PR (no workflow-level paths filter). A
+# `changes` job decides whether the agent was actually touched; `build` is
+# skipped otherwise. This avoids the branch-protection deadlock where a
+# path-filtered required check stays pending forever on unrelated PRs.
+# Mark `build` as the required status check — a skipped job counts as success.
 
 on:
   pull_request:
-    paths:
-      - "bpf/**"
-      - "cmd/**"
-      - "internal/**"
-      - "go.mod"
-      - "go.sum"
-      - "build/agent/**"
-      - ".github/workflows/agent-ci.yml"
   push:
     branches: [main]
-    paths:
-      - "bpf/**"
-      - "cmd/**"
-      - "internal/**"
-      - "go.mod"
-      - "go.sum"
-      - "build/agent/**"
-      - ".github/workflows/agent-ci.yml"
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      agent: ${{ steps.filter.outputs.agent }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            agent:
+              - 'bpf/**'
+              - 'cmd/**'
+              - 'internal/**'
+              - 'go.mod'
+              - 'go.sum'
+              - 'build/agent/**'
+              - '.github/workflows/agent-ci.yml'
+
   build:
+    needs: changes
+    if: needs.changes.outputs.agent == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,20 +50,15 @@ jobs:
       - name: Install eBPF toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang llvm libbpf-dev bpftool
-
-      - name: Ensure vmlinux.h
-        run: |
-          if [ ! -f bpf/vmlinux.h ]; then
-            echo "bpf/vmlinux.h not committed; generating from runner BTF"
-            sudo bpftool btf dump file /sys/kernel/btf/vmlinux format c > bpf/vmlinux.h
-          fi
+          sudo apt-get install -y --no-install-recommends clang llvm libbpf-dev
 
       - name: Generate eBPF bindings
         run: go generate ./...
 
       - name: gofmt
         run: |
+          # git ls-files excludes the gitignored generated bindings, so this
+          # only checks hand-written source.
           unformatted="$(gofmt -l $(git ls-files '*.go'))"
           if [ -n "$unformatted" ]; then
             echo "These files need gofmt:"
@@ -68,3 +74,16 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Validate image build (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/agent/Dockerfile
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
