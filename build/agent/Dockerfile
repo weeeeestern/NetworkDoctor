@@ -35,7 +35,11 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath -ldflags="-s -w" \
         -o /out/networkdoctor-agent ./cmd/networkdoctor-agent
 
-FROM gcr.io/distroless/static-debian12:nonroot
+# Root (uid 0) base on purpose: the agent needs CAP_BPF/CAP_PERFMON/
+# CAP_NET_ADMIN (or privileged) to load eBPF. Kubernetes has no ambient
+# capability support, so a non-root process cannot make added capabilities
+# effective and bpf() fails with EPERM. Do NOT switch to the :nonroot tag.
+FROM gcr.io/distroless/static-debian12
 
 COPY --from=build /out/networkdoctor-agent /networkdoctor-agent
 
