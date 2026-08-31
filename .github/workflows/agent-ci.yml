@@ -1,0 +1,118 @@
+name: agent-ci
+
+# PR / main validation for the node agent (eBPF + Go).
+# Everything here needs a Linux runner: the Go packages are //go:build linux
+# gated and the eBPF program is compiled with clang.
+#
+# The workflow triggers on every PR (no workflow-level paths filter). A
+# `changes` job decides whether the agent was actually touched; `build` is
+# skipped otherwise. This avoids the branch-protection deadlock where a
+# path-filtered required check stays pending forever on unrelated PRs.
+#
+# Mark `agent-ci-gate` (NOT `build`) as the required status check. GitHub
+# counts a skipped job as success, so if `changes` ever fails, `build` would
+# skip -> green and let a PR merge unvalidated. The gate job runs always and
+# fails unless `changes` succeeded and `build` is success-or-skipped.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      agent: ${{ steps.filter.outputs.agent }}
+      imagebuild: ${{ steps.filter.outputs.imagebuild }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            agent:
+              - 'bpf/**'
+              - 'cmd/**'
+              - 'internal/**'
+              - 'go.mod'
+              - 'go.sum'
+              - 'build/agent/**'
+              - '.github/workflows/agent-ci.yml'
+            imagebuild:
+              - 'build/agent/**'
+              - 'bpf/**'
+              - 'go.mod'
+              - 'go.sum'
+
+  build:
+    needs: changes
+    if: needs.changes.outputs.agent == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install eBPF toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang llvm libbpf-dev
+
+      - name: Generate eBPF bindings
+        run: go generate ./...
+
+      - name: gofmt
+        run: |
+          # git ls-files excludes the gitignored generated bindings, so this
+          # only checks hand-written source.
+          unformatted="$(gofmt -l $(git ls-files '*.go'))"
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./cmd/networkdoctor-agent
+
+      - name: Test
+        run: go test ./...
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Only when build-relevant files change: the native go build/test above
+      # already covers pure Go-logic changes; this catches Dockerfile mechanics
+      # and the container toolchain (bookworm clang/libbpf) diverging.
+      - name: Validate image build (no push)
+        if: needs.changes.outputs.imagebuild == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/agent/Dockerfile
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Required status check. Always runs so it never stays pending; passes only
+  # when changes succeeded and build is success (agent touched) or skipped
+  # (agent untouched). A failed/cancelled build fails the gate.
+  agent-ci-gate:
+    needs: [changes, build]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate results
+        run: |
+          echo "changes=${{ needs.changes.result }} build=${{ needs.build.result }}"
+          [ "${{ needs.changes.result }}" = "success" ] || exit 1
+          r="${{ needs.build.result }}"
+          [ "$r" = "success" ] || [ "$r" = "skipped" ] || exit 1
