@@ -1,0 +1,29 @@
+# Example overrides for the on-prem lab described in the handoff.
+# Every VERIFY value is a placeholder until Phase 0 discovery has run.
+global:
+  clusterName: onprem-lab
+
+agent:
+  # VERIFY with: ssh worker01@192.168.0.18 'ip route get 1.1.1.1'
+  iface: eth0
+  hostNetwork: true
+  privileged: true
+
+# VERIFY: kubectl get crd | grep -E 'servicemonitors|prometheusrules'
+serviceMonitor:
+  enabled: false
+  labels: {}
+  #  release: kube-prometheus-stack
+prometheusRule:
+  enabled: false
+  labels: {}
+  #  release: kube-prometheus-stack
+ruleConfigMap:
+  enabled: false
+
+backend:
+  config:
+    # VERIFY: kubectl get svc -A | grep -i prometheus
+    prometheusURL: ""
+  persistence:
+    enabled: false

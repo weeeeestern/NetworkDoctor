@@ -1,0 +1,19 @@
+{{- if and .Values.backend.enabled .Values.backend.persistence.enabled (not .Values.backend.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "networkdoctor.backend.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "networkdoctor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  accessModes:
+    {{- toYaml .Values.backend.persistence.accessModes | nindent 4 }}
+  {{- with .Values.backend.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.backend.persistence.size }}
+{{- end }}

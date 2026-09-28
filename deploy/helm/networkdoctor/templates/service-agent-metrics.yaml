@@ -1,0 +1,29 @@
+{{- if .Values.agent.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "networkdoctor.agent.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "networkdoctor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+    {{- with .Values.agent.service.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.agent.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  # Headless: one endpoint per node, no load-balancing; Prometheus needs to
+  # scrape every agent, not "an" agent.
+  clusterIP: None
+  selector:
+    {{- include "networkdoctor.agent.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.agent.port }}
+      targetPort: metrics
+      protocol: TCP
+{{- end }}
