@@ -126,8 +126,11 @@ serviceMonitor:
   scrapeTimeout: 10s
   # Adds a `node` label from the pod's node name so rules and Alertmanager
   # grouping can key on the node instead of instance=ip:port.
+  # `action: replace` is the CRD default; it is written explicitly so the live
+  # object matches Git and Argo CD does not report a permanent OutOfSync.
   relabelings:
-    - sourceLabels: [__meta_kubernetes_pod_node_name]
+    - action: replace
+      sourceLabels: [__meta_kubernetes_pod_node_name]
       targetLabel: node
   metricRelabelings: []
 
