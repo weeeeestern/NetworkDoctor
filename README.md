@@ -140,17 +140,30 @@ incident
 
 ```text
 .
-├─ .github/
+├─ .github/workflows/        # agent-ci, agent-image, backend-image, deploy-ci
 ├─ bpf/
-│  └─ networkdoctor.bpf.c
+│  └─ networkdoctor.bpf.c    # kernel-side eBPF collector
+├─ build/
+│  ├─ agent/Dockerfile
+│  └─ backend/Dockerfile
 ├─ cmd/
-│  └─ networkdoctor-agent/
-│     └─ main.go
+│  ├─ networkdoctor-agent/   # eBPF loader + Prometheus exporter (Linux only)
+│  └─ networkdoctor-backend/ # Alertmanager webhook -> incident JSON
+├─ internal/
+│  ├─ app/ bpf/ config/ metrics/ model/ worker/   # agent
+│  └─ backend/ api/ alertmanager/ config/ incident/ # backend
+├─ deploy/
+│  ├─ helm/networkdoctor/    # DaemonSet, Service, ServiceMonitor, PrometheusRule/ConfigMap, backend
+│  ├─ alertmanager/          # route/receiver examples
+│  └─ prometheus/rules/      # rule file notes
+├─ docs/deploy-onprem.md     # on-prem MVP install / verification / rollback
 ├─ prestudy/
 ├─ go.mod
 ├─ go.sum
 └─ README.md
 ```
+
+MVP 단계의 책임 분리는 다음과 같습니다. 탐지(firing/resolved)는 Prometheus 룰이, 라우팅·그룹핑·재전송은 Alertmanager가, 인시던트 기록·근거 수집·HolmesGPT 호출·리포트는 backend가 맡습니다. 자세한 설치 절차는 [docs/deploy-onprem.md](./docs/deploy-onprem.md)를 참고하세요.
 
 ## Repository Description
 
