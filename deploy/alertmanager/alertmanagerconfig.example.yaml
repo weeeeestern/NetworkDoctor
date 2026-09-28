@@ -1,0 +1,35 @@
+# Prometheus Operator AlertmanagerConfig (CRD alertmanagerconfigs.monitoring.coreos.com).
+#
+# The Operator automatically adds a `namespace="<this CR's namespace>"`
+# matcher to the route, so this CR must live in the namespace whose alerts it
+# should catch. NetworkDoctor agent alerts carry namespace=networkdoctor (the
+# Service namespace picked up by the ServiceMonitor), so create it there.
+#
+# The Alertmanager CR must select it:  alertmanagerConfigSelector / Namespace
+# selector (kube-prometheus-stack: alertmanager.alertmanagerSpec.alertmanagerConfigSelector).
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: networkdoctor
+  namespace: networkdoctor
+  labels:
+    # VERIFY against the Alertmanager CR's alertmanagerConfigSelector.
+    alertmanagerConfig: networkdoctor
+spec:
+  route:
+    receiver: networkdoctor-backend
+    matchers:
+      - name: source
+        value: networkdoctor
+        matchType: "="
+    groupBy: ["alertname", "namespace", "service", "node", "rule_id"]
+    groupWait: 30s
+    groupInterval: 2m
+    repeatInterval: 4h
+    continue: true
+  receivers:
+    - name: networkdoctor-backend
+      webhookConfigs:
+        - url: http://networkdoctor-backend.networkdoctor.svc:8080/webhooks/alertmanager
+          sendResolved: true
+          maxAlerts: 0

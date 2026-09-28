@@ -1,0 +1,39 @@
+# On-prem lab overrides (k8s-cp-01 + worker01..03).
+# Filled from the 2026-09-28 Phase 0 discovery; see docs/deploy-onprem.md §0.
+global:
+  clusterName: onprem-lab
+
+agent:
+  # Verified via node-exporter node_network_up: all three workers use eno1 (1 GbE).
+  # The control plane VM uses ens18 and is tainted node-role.kubernetes.io/control-plane.
+  # The chart default tolerates every taint, which would schedule the agent there
+  # and fail on "find interface eno1". Drop the tolerations so the taint keeps it
+  # on the workers only.
+  iface: eno1
+  hostNetwork: true
+  privileged: true
+  tolerations: []
+
+# kube-prometheus-stack 84.5.0 in ns monitoring. Both selectors are
+# `release: prometheus-stack` with no namespace restriction.
+serviceMonitor:
+  enabled: true
+  labels:
+    release: prometheus-stack
+prometheusRule:
+  enabled: true
+  labels:
+    release: prometheus-stack
+ruleConfigMap:
+  enabled: false
+
+backend:
+  # The backend image is published by backend-image.yml on a main push or a
+  # manual workflow_dispatch run. Flip to true once
+  # docker.io/7910trio/networkdoctor-backend:edge exists.
+  enabled: false
+  config:
+    prometheusURL: http://prometheus-stack-kube-prom-prometheus.monitoring.svc:9090
+  persistence:
+    # No StorageClass on this cluster (kubectl get storageclass -> none).
+    enabled: false

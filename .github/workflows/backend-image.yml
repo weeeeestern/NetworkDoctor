@@ -1,0 +1,68 @@
+name: backend-image
+
+# Build and push the backend image to Docker Hub. Mirrors agent-image.yml:
+# main pushes and version tags only, so registry credentials never reach
+# fork PRs. The image build is validated (no push) in agent-ci.
+#
+# Tagging convention:
+#   main push  -> edge, main-<sha>
+#   v1.2.3 tag -> 1.2.3, 1.2, latest
+#
+# Required repository secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN.
+
+on:
+  # Manual run from any branch (Actions tab -> backend-image -> Run workflow).
+  # Used to publish the first `edge` image before the chart PR is merged.
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "cmd/networkdoctor-backend/**"
+      - "internal/backend/**"
+      - "build/backend/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/backend-image.yml"
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/networkdoctor-backend
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' }}
+            type=sha,prefix=main-,enable={{is_default_branch}}
+            type=sha,prefix={{branch}}-,enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/backend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

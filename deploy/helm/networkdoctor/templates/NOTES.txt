@@ -1,0 +1,22 @@
+NetworkDoctor {{ .Chart.Version }} installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Agent DaemonSet : {{ include "networkdoctor.agent.fullname" . }}  (iface={{ .Values.agent.iface }}, hostNetwork={{ .Values.agent.hostNetwork }}, privileged={{ .Values.agent.privileged }})
+Agent metrics   : http://<node-ip>:{{ .Values.agent.port }}{{ .Values.agent.metricsPath }}
+{{- if .Values.backend.enabled }}
+Backend webhook : {{ include "networkdoctor.backend.webhookURL" . }}
+{{- end }}
+
+Check the agents came up and loaded eBPF on every node:
+  kubectl -n {{ .Release.Namespace }} get ds {{ include "networkdoctor.agent.fullname" . }}
+  kubectl -n {{ .Release.Namespace }} logs ds/{{ include "networkdoctor.agent.fullname" . }} --tail=20
+
+{{- if not .Values.serviceMonitor.enabled }}
+
+serviceMonitor.enabled=false: Prometheus is NOT scraping the agent yet. Either
+enable it (Prometheus Operator) or add a scrape job for the headless service
+{{ include "networkdoctor.agent.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.agent.port }} (see docs/deploy-onprem.md).
+{{- end }}
+{{- if and (not .Values.prometheusRule.enabled) (not .Values.ruleConfigMap.enabled) }}
+
+No alert rules were installed (prometheusRule.enabled=false, ruleConfigMap.enabled=false).
+{{- end }}

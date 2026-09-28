@@ -1,0 +1,16 @@
+apiVersion: v2
+name: networkdoctor
+description: NetworkDoctor on-prem MVP - eBPF node agent DaemonSet, Prometheus scrape/rules wiring, and the Alertmanager-webhook backend.
+type: application
+version: 0.1.0
+# appVersion tracks the image tag family published by .github/workflows/*-image.yml.
+appVersion: edge
+keywords:
+  - ebpf
+  - kubernetes
+  - network
+  - prometheus
+  - alertmanager
+home: https://github.com/weeeeestern/NetworkDoctor
+sources:
+  - https://github.com/weeeeestern/NetworkDoctor

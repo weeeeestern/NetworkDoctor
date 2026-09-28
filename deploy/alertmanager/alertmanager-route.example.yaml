@@ -1,0 +1,27 @@
+# Snippet for a hand-managed alertmanager.yml. Merge into the existing
+# `route.routes` and `receivers` lists; do not replace the file.
+route:
+  # ... existing top-level route settings ...
+  routes:
+    - receiver: networkdoctor-backend
+      matchers:
+        - source="networkdoctor"
+      # Stable grouping keys. `node` comes from the ServiceMonitor relabeling,
+      # `rule_id` from the rule labels. Missing labels are simply ignored.
+      group_by: ["alertname", "namespace", "service", "node", "rule_id"]
+      group_wait: 30s
+      group_interval: 2m
+      repeat_interval: 4h
+      # continue: true lets the alert also reach the routes below it (Slack,
+      # email, ...). Set false to make the backend the only receiver.
+      continue: true
+
+receivers:
+  - name: networkdoctor-backend
+    webhook_configs:
+      - url: http://networkdoctor-backend.networkdoctor.svc:8080/webhooks/alertmanager
+        send_resolved: true
+        # 0 = no truncation; the backend creates one incident per alert.
+        max_alerts: 0
+        http_config:
+          follow_redirects: false

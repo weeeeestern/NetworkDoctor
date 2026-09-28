@@ -1,0 +1,223 @@
+# Default values for the networkdoctor chart.
+#
+# Cluster-specific facts that MUST be verified before the first install are
+# marked with "VERIFY". See docs/deploy-onprem.md for the discovery commands.
+
+nameOverride: ""
+fullnameOverride: ""
+
+global:
+  # Stamped into every incident by the backend (ND_CLUSTER_NAME).
+  clusterName: onprem-lab
+
+# ---------------------------------------------------------------------------
+# eBPF node agent (DaemonSet)
+# ---------------------------------------------------------------------------
+agent:
+  enabled: true
+
+  image:
+    # Published by .github/workflows/agent-image.yml. Verified pullable tags on
+    # 2026-09-28: edge, main-54ddf96.
+    repository: docker.io/7910trio/networkdoctor-agent
+    tag: edge
+    pullPolicy: IfNotPresent
+  imagePullSecrets: []
+
+  # VERIFY: host NIC that carries pod/node traffic. The agent default "eth0"
+  # is usually wrong on bare-metal workers (eno1, ens18, enp3s0, bond0, ...).
+  # Discover with:  ip route get 1.1.1.1   on each worker.
+  iface: eth0
+
+  # VERIFY: run in the host network namespace.
+  # internal/bpf/tc.go resolves `iface` with netlink.LinkByName inside the
+  # process's own network namespace. A pod network namespace only contains its
+  # veth (named eth0), so without hostNetwork the TC programs would attach to
+  # the pod veth and never see host traffic. privileged: true does NOT change
+  # the network namespace; only hostNetwork does. Keep true unless a one-node
+  # test proves otherwise.
+  hostNetwork: true
+
+  # Metrics listener. With hostNetwork the port is bound on the node itself,
+  # so it must be free on every worker.
+  port: 9102
+  metricsPath: /metrics
+
+  # Threshold flags written into the nd_config BPF map. Keys are the agent
+  # flag names without the leading dash; empty map = agent defaults.
+  thresholds: {}
+  #  slow-tcp-rtt: 100ms
+  #  short-tcp-conn: 100ms
+  #  slow-dns: 50ms
+  #  long-udp-flow: 30s
+  #  high-runqlat: 5ms
+  #  retrans-window: 1s
+  #  event-cooldown: 5s
+  #  retrans-burst: "3"
+  #  cwnd-drop-percent: "50"
+  #  gc-interval: 10s
+  #  dns-timeout: 5s
+  #  udp-idle-timeout: 60s
+
+  extraArgs: []
+
+  # privileged is acceptable for the first on-prem milestone. When set to
+  # false the capability list below is used instead; that path is untested and
+  # must be verified on one node first (CAP_BPF/CAP_PERFMON need kernel 5.8+).
+  privileged: true
+  capabilities:
+    - BPF
+    - PERFMON
+    - NET_ADMIN
+    - SYS_RESOURCE
+    - SYS_ADMIN
+
+  mounts:
+    # /sys/kernel/btf/vmlinux is required for CO-RE relocation at load time.
+    btf: true
+    # bpffs; not strictly required today (nothing is pinned) but harmless and
+    # needed as soon as pinning is introduced.
+    bpffs: true
+    # /sys/kernel/debug (tracefs) is only needed by legacy kprobe attach on
+    # kernels without perf_event_open kprobe support.
+    debugfs: false
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+  nodeSelector:
+    kubernetes.io/os: linux
+  # Run on every Linux node, including tainted control-plane nodes.
+  tolerations:
+    - operator: Exists
+  affinity: {}
+  priorityClassName: ""
+  terminationGracePeriodSeconds: 10
+
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+
+  podAnnotations: {}
+  podLabels: {}
+
+  service:
+    # ClusterIP service used as the ServiceMonitor target (and as a plain
+    # scrape endpoint for non-Operator Prometheus).
+    annotations: {}
+    labels: {}
+
+# ---------------------------------------------------------------------------
+# Prometheus scrape wiring
+# ---------------------------------------------------------------------------
+serviceMonitor:
+  # VERIFY: enable only if servicemonitors.monitoring.coreos.com exists.
+  enabled: false
+  # Namespace to create the ServiceMonitor in (default: release namespace).
+  namespace: ""
+  # kube-prometheus-stack selects ServiceMonitors by label (release: <name>).
+  labels: {}
+  interval: 30s
+  scrapeTimeout: 10s
+  # Adds a `node` label from the pod's node name so rules and Alertmanager
+  # grouping can key on the node instead of instance=ip:port.
+  relabelings:
+    - sourceLabels: [__meta_kubernetes_pod_node_name]
+      targetLabel: node
+  metricRelabelings: []
+
+# ---------------------------------------------------------------------------
+# Detection layer: Prometheus alert rules (smoke-test set)
+# ---------------------------------------------------------------------------
+# The rule content lives in rules/networkdoctor-smoke-rules.yaml inside the
+# chart so the same file feeds both the PrometheusRule CR and the ConfigMap
+# fallback.
+prometheusRule:
+  # VERIFY: enable only if prometheusrules.monitoring.coreos.com exists.
+  enabled: false
+  namespace: ""
+  # kube-prometheus-stack default ruleSelector needs release: <name>.
+  labels: {}
+  # Extra rule groups appended verbatim.
+  additionalGroups: []
+
+ruleConfigMap:
+  # Fallback for Prometheus stacks without the PrometheusRule CRD: renders the
+  # same rule file into a ConfigMap you can mount under rule_files.
+  enabled: false
+  name: ""
+
+# ---------------------------------------------------------------------------
+# Backend (Alertmanager webhook -> incidents)
+# ---------------------------------------------------------------------------
+backend:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    # Published by .github/workflows/backend-image.yml (needs one main push
+    # after this chart lands, or build/push manually).
+    repository: docker.io/7910trio/networkdoctor-backend
+    tag: edge
+    pullPolicy: IfNotPresent
+  imagePullSecrets: []
+
+  service:
+    type: ClusterIP
+    port: 8080
+    annotations: {}
+
+  config:
+    # Optional now; consumed by the evidence/Holmes milestones.
+    prometheusURL: ""
+    holmesURL: ""
+    evidenceWindow: 15m
+    maxBodyBytes: "4194304"
+  extraEnv: []
+
+  persistence:
+    # false = emptyDir: incidents are lost when the pod restarts. Fine for the
+    # first smoke test, not for anything you want to keep.
+    enabled: false
+    existingClaim: ""
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 1Gi
+  dataDir: /data/incidents
+
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+  podLabels: {}
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
