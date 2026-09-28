@@ -38,9 +38,11 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - 'build/agent/**'
+              - 'build/backend/**'
               - '.github/workflows/agent-ci.yml'
             imagebuild:
               - 'build/agent/**'
+              - 'build/backend/**'
               - 'bpf/**'
               - 'go.mod'
               - 'go.sum'
@@ -79,8 +81,11 @@ jobs:
       - name: go vet
         run: go vet ./...
 
-      - name: Build
+      - name: Build agent
         run: go build ./cmd/networkdoctor-agent
+
+      - name: Build backend
+        run: go build ./cmd/networkdoctor-backend
 
       - name: Test
         run: go test ./...
@@ -91,12 +96,23 @@ jobs:
       # Only when build-relevant files change: the native go build/test above
       # already covers pure Go-logic changes; this catches Dockerfile mechanics
       # and the container toolchain (bookworm clang/libbpf) diverging.
-      - name: Validate image build (no push)
+      - name: Validate agent image build (no push)
         if: needs.changes.outputs.imagebuild == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: build/agent/Dockerfile
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Validate backend image build (no push)
+        if: needs.changes.outputs.imagebuild == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/backend/Dockerfile
           platforms: linux/amd64
           push: false
           cache-from: type=gha

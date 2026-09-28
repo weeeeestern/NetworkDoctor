@@ -1,0 +1,77 @@
+name: deploy-ci
+
+# Validates the deployment assets: Helm chart lint/render across the value
+# combinations that matter, plus promtool on the rule file. Path-filtered at
+# the job level (not workflow level) for the same branch-protection reason
+# documented in agent-ci.yml.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      deploy: ${{ steps.filter.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            deploy:
+              - 'deploy/**'
+              - '.github/workflows/deploy-ci.yml'
+
+  helm:
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    env:
+      CHART: deploy/helm/networkdoctor
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+
+      - name: helm lint (defaults)
+        run: helm lint "$CHART"
+
+      - name: helm lint (lab values)
+        run: helm lint "$CHART" -f "$CHART/values-onprem-lab.yaml"
+
+      - name: helm template variants
+        run: |
+          set -euo pipefail
+          helm template nd "$CHART" -n networkdoctor > /tmp/default.yaml
+          helm template nd "$CHART" -n networkdoctor \
+            --set serviceMonitor.enabled=true --set prometheusRule.enabled=true \
+            --set serviceMonitor.labels.release=kps --set prometheusRule.labels.release=kps \
+            > /tmp/operator.yaml
+          helm template nd "$CHART" -n networkdoctor \
+            --set ruleConfigMap.enabled=true --set agent.hostNetwork=false \
+            --set agent.privileged=false --set backend.persistence.enabled=true \
+            > /tmp/fallback.yaml
+          grep -q 'kind: ServiceMonitor' /tmp/operator.yaml
+          grep -q 'kind: PrometheusRule' /tmp/operator.yaml
+          grep -q 'kind: ConfigMap' /tmp/fallback.yaml
+          grep -q 'kind: PersistentVolumeClaim' /tmp/fallback.yaml
+          ! grep -q 'kind: ServiceMonitor' /tmp/default.yaml
+
+      - name: promtool check rules
+        run: |
+          docker run --rm -v "$PWD:/work" --entrypoint promtool prom/prometheus:v3.5.0 \
+            check rules /work/$CHART/rules/networkdoctor-smoke-rules.yaml
+
+  deploy-ci-gate:
+    needs: [changes, helm]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate results
+        run: |
+          echo "changes=${{ needs.changes.result }} helm=${{ needs.helm.result }}"
+          [ "${{ needs.changes.result }}" = "success" ] || exit 1
+          r="${{ needs.helm.result }}"
+          [ "$r" = "success" ] || [ "$r" = "skipped" ] || exit 1
