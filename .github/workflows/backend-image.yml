@@ -11,6 +11,9 @@ name: backend-image
 # Required repository secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN.
 
 on:
+  # Manual run from any branch (Actions tab -> backend-image -> Run workflow).
+  # Used to publish the first `edge` image before the chart PR is merged.
+  workflow_dispatch:
   push:
     branches: [main]
     tags: ["v*"]
@@ -36,8 +39,9 @@ jobs:
           flavor: |
             latest=false
           tags: |
-            type=raw,value=edge,enable={{is_default_branch}}
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' }}
             type=sha,prefix=main-,enable={{is_default_branch}}
+            type=sha,prefix={{branch}}-,enable=${{ github.event_name == 'workflow_dispatch' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}

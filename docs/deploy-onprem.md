@@ -110,6 +110,12 @@ needed, set `agent.hostNetwork=false` and record why in values.yaml.
 
 ## 2. Install
 
+The lab installs through Argo CD with manual sync (see
+`deploy/argocd/README.md` for the exact sequence, including removal of the
+hand-applied DaemonSet that already runs on this cluster). The chart itself
+is plain Helm, so a direct install works the same way on a cluster without
+Argo CD:
+
 ```bash
 kubectl create namespace networkdoctor
 
@@ -196,11 +202,15 @@ helm -n networkdoctor uninstall networkdoctor     # removes DS, backend, svc, mo
 Uninstalling the DaemonSet detaches the TC filters and BPF links (the agent
 closes them on SIGTERM). The clsact qdisc stays on the NIC; it is inert.
 
-## 6. Argo CD (later)
+## 6. Argo CD
 
-Only after the manual install works: create an `Application` pointing at
-`deploy/helm/networkdoctor` with `values-onprem-lab.yaml`. The chart is
-already release-name and namespace aware, so nothing changes in the chart.
+`deploy/argocd/networkdoctor-application.yaml` points at the chart path with
+`values-onprem-lab.yaml`. It has no `syncPolicy.automated`, so Argo CD only
+reports drift; a person syncs. `targetRevision` tracks the PR branch until
+the merge, then `main`.
+
+Helm release name and namespace are the same as a direct `helm install`, so
+the chart needs no changes for Argo CD.
 
 ## Known gaps in this milestone
 
