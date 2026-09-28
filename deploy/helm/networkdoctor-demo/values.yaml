@@ -58,6 +58,9 @@ loadgen:
     pullPolicy: IfNotPresent
   qps: 10
   connections: 4
+  # Reconnect every N requests (random in min:max) so keep-alive connections do
+  # not pin all traffic to one replica; both pods/nodes then see load.
+  connectionReuse: "20:40"
   # Extra fortio args (e.g. ["-uniform", "-nocatchup"]).
   extraArgs: []
   resources:

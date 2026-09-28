@@ -31,6 +31,9 @@ spec:
             - -t=0
             - -quiet
             - -allow-initial-errors
+            {{- with .Values.loadgen.connectionReuse }}
+            - -connection-reuse={{ . }}
+            {{- end }}
             {{- range .Values.loadgen.extraArgs }}
             - {{ . | quote }}
             {{- end }}
