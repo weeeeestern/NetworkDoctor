@@ -25,6 +25,8 @@ NetworkDoctor의 목표는 장애 상황에서 다음 흐름을 하나의 진단
 
 ## Architecture
 
+![alt text](networkdoctor-flow.png)
+
 ```text
 Kubernetes Cluster
 ├─ Node Agent DaemonSet
