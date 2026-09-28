@@ -4,8 +4,8 @@
 # reaches the cluster until a person presses Sync (UI) or runs `argocd app sync`.
 # Argo CD still refreshes and shows OutOfSync/diff on every Git change.
 #
-# targetRevision points at the PR branch while the chart is under review;
-# switch it to `main` after the merge.
+# targetRevision is `main`: only merged code is ever deployable. Test a branch
+# by temporarily pointing this at the branch name, then put it back.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -19,7 +19,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/weeeeestern/NetworkDoctor.git
-    targetRevision: feat/onprem-mvp-deploy-backend-webhook
+    targetRevision: main
     path: deploy/helm/networkdoctor
     helm:
       releaseName: networkdoctor

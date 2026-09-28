@@ -61,5 +61,6 @@ Every Git change to `deploy/helm/networkdoctor/**` on the tracked branch makes
 the app OutOfSync. Nothing happens until someone syncs. To roll back, sync a
 previous revision from the History tab, or revert the commit and sync.
 
-After the PR is merged, change `targetRevision` to `main` and re-apply the
-Application manifest.
+`targetRevision` is `main`, so a change is deployable only after its PR is
+merged. That is deliberate: the branch that Argo CD watches is the branch
+that review protects.
