@@ -1,0 +1,22 @@
+# kube-prometheus-stack values fragment. Merge into the existing
+# `alertmanager.config` block of the stack's values file; the chart renders it
+# into alertmanager.yaml. Keep the stack's existing receivers and default
+# route; only the `routes` entry and the receiver below are new.
+alertmanager:
+  config:
+    route:
+      routes:
+        - receiver: networkdoctor-backend
+          matchers:
+            - source="networkdoctor"
+          group_by: ["alertname", "namespace", "service", "node", "rule_id"]
+          group_wait: 30s
+          group_interval: 2m
+          repeat_interval: 4h
+          continue: true
+    receivers:
+      - name: networkdoctor-backend
+        webhook_configs:
+          - url: http://networkdoctor-backend.networkdoctor.svc:8080/webhooks/alertmanager
+            send_resolved: true
+            max_alerts: 0
