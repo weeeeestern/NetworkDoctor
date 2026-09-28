@@ -1,0 +1,68 @@
+# Demo workload for NetworkDoctor.
+#
+# Why podinfo: it exports the exact metric the Rule 1/7 skills look for
+# (http_request_duration_seconds histogram, http_requests_total) and has
+# fault endpoints (/delay/{s}, /status/{code}, /chaos/*) so application-side
+# latency and errors can be injected without extra tooling.
+
+nameOverride: ""
+fullnameOverride: ""
+
+app:
+  # Shown in labels and the UI; the Service is also named after it.
+  name: catshop
+  replicaCount: 2
+  image:
+    repository: ghcr.io/stefanprodan/podinfo
+    tag: 6.15.0
+    pullPolicy: IfNotPresent
+  # podinfo UI knobs. The logo URL is fetched by the *browser*, so it must be
+  # reachable from wherever you open the page. cataas.com returns a random cat.
+  ui:
+    message: "Cat Shop - NetworkDoctor demo"
+    logo: "https://cataas.com/cat?width=320"
+    color: "#3b2f2f"
+  ports:
+    http: 9898
+    metrics: 9797
+    grpc: 9999
+  service:
+    type: NodePort
+    # Set to "" to let Kubernetes pick one.
+    nodePort: 30898
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+serviceMonitor:
+  enabled: true
+  # kube-prometheus-stack selects ServiceMonitors by label.
+  labels:
+    release: prometheus-stack
+  interval: 15s
+  scrapeTimeout: 10s
+
+loadgen:
+  # Steady background traffic so latency quantiles always exist.
+  enabled: true
+  image:
+    repository: fortio/fortio
+    tag: 1.69.5
+    pullPolicy: IfNotPresent
+  qps: 10
+  connections: 4
+  # Extra fortio args (e.g. ["-uniform", "-nocatchup"]).
+  extraArgs: []
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      memory: 128Mi

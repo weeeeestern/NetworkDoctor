@@ -1,0 +1,49 @@
+{{- if .Values.loadgen.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "demo.loadgen.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "demo.labels" . | nindent 4 }}
+    {{- include "demo.loadgen.selectorLabels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "demo.loadgen.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "demo.loadgen.selectorLabels" . | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: fortio
+          image: "{{ .Values.loadgen.image.repository }}:{{ .Values.loadgen.image.tag }}"
+          imagePullPolicy: {{ .Values.loadgen.image.pullPolicy }}
+          # -t 0 = run until the pod stops; steady traffic keeps
+          # http_request_duration_seconds quantiles meaningful.
+          args:
+            - load
+            - -qps={{ .Values.loadgen.qps }}
+            - -c={{ .Values.loadgen.connections }}
+            - -t=0
+            - -quiet
+            - -allow-initial-errors
+            {{- range .Values.loadgen.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
+            - http://{{ include "demo.app.name" . }}.{{ .Release.Namespace }}.svc:{{ .Values.app.ports.http }}/
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: [ALL]
+          {{- with .Values.loadgen.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

@@ -1,0 +1,12 @@
+apiVersion: v2
+name: networkdoctor-demo
+description: Instrumented demo workload for NetworkDoctor - a podinfo-based "Cat Shop" HTTP service with Prometheus histograms and built-in fault endpoints, plus a steady fortio load generator.
+type: application
+version: 0.1.0
+appVersion: "6.15.0"
+keywords:
+  - demo
+  - podinfo
+  - fortio
+  - prometheus
+home: https://github.com/weeeeestern/NetworkDoctor

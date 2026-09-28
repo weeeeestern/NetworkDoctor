@@ -1,0 +1,14 @@
+{{ include "demo.app.name" . }} (podinfo {{ .Values.app.image.tag | default .Chart.AppVersion }}) installed in "{{ .Release.Namespace }}".
+
+UI      : {{ if eq .Values.app.service.type "NodePort" }}http://<any-node-ip>:{{ .Values.app.service.nodePort }}/{{ else }}http://{{ include "demo.app.name" . }}.{{ .Release.Namespace }}.svc:{{ .Values.app.ports.http }}/{{ end }}
+Metrics : http://{{ include "demo.app.name" . }}.{{ .Release.Namespace }}.svc:{{ .Values.app.ports.metrics }}/metrics
+Loadgen : {{ if .Values.loadgen.enabled }}{{ .Values.loadgen.qps }} req/s from {{ include "demo.loadgen.name" . }}{{ else }}disabled{{ end }}
+
+Fault injection (application side, no node changes):
+  /delay/2        every request waits 2s        -> latency p99 rises, network signals flat (Rule 7 shape)
+  /status/500     returns HTTP 500              -> 5xx rate rises
+  /chaos/cpu      burns CPU for a while         -> runqlat rises on that node
+
+PromQL to check after a minute of traffic:
+  histogram_quantile(0.99, sum by (le, namespace, service) (rate(http_request_duration_seconds_bucket{service="{{ include "demo.app.name" . }}"}[5m])))
+  sum by (status) (rate(http_requests_total{service="{{ include "demo.app.name" . }}"}[5m]))

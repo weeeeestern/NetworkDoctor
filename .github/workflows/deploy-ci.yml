@@ -41,6 +41,11 @@ jobs:
       - name: helm lint (lab values)
         run: helm lint "$CHART" -f "$CHART/values-onprem-lab.yaml"
 
+      - name: helm lint + template (demo chart)
+        run: |
+          helm lint deploy/helm/networkdoctor-demo
+          helm template demo deploy/helm/networkdoctor-demo -n networkdoctor-demo | grep -q 'kind: ServiceMonitor'
+
       - name: helm template variants
         run: |
           set -euo pipefail

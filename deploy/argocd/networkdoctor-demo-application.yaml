@@ -1,0 +1,26 @@
+# Argo CD Application for the demo workload (Cat Shop). Manual sync only,
+# same as the main application: no `syncPolicy.automated`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: networkdoctor-demo
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/weeeeestern/NetworkDoctor.git
+    targetRevision: main
+    path: deploy/helm/networkdoctor-demo
+    helm:
+      releaseName: networkdoctor-demo
+  destination:
+    server: https://kubernetes.default.svc
+    # Existing namespace; the http-echo backend and netshoot client already
+    # there are not managed by this app and are left alone.
+    namespace: networkdoctor-demo
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

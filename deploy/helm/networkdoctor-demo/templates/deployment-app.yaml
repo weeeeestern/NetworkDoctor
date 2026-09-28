@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "demo.app.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "demo.labels" . | nindent 4 }}
+    {{- include "demo.app.selectorLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.app.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "demo.app.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "demo.app.selectorLabels" . | nindent 8 }}
+      {{- with .Values.app.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.app.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.app.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.app.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: podinfo
+          image: "{{ .Values.app.image.repository }}:{{ .Values.app.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.app.image.pullPolicy }}
+          command:
+            - ./podinfo
+            - --port={{ .Values.app.ports.http }}
+            - --port-metrics={{ .Values.app.ports.metrics }}
+            - --grpc-port={{ .Values.app.ports.grpc }}
+            - --level=info
+            - {{ printf "--ui-message=%s" .Values.app.ui.message | quote }}
+            - {{ printf "--ui-logo=%s" .Values.app.ui.logo | quote }}
+            - {{ printf "--ui-color=%s" .Values.app.ui.color | quote }}
+          env:
+            - name: PODINFO_UI_MESSAGE
+              value: {{ .Values.app.ui.message | quote }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.app.ports.http }}
+            - name: http-metrics
+              containerPort: {{ .Values.app.ports.metrics }}
+            - name: grpc
+              containerPort: {{ .Values.app.ports.grpc }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 100
+            capabilities:
+              drop: [ALL]
+          {{- with .Values.app.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
