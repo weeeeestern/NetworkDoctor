@@ -27,7 +27,7 @@ groups:
           rule_id: smoke-0
           scenario: smoke-agent-down
         annotations:
-          summary: "NetworkDoctor agent scrape failing on {{ $labels.node }}{{ $labels.instance }}"
+          summary: "NetworkDoctor agent scrape failing on {{ if $labels.node }}{{ $labels.node }}{{ else }}{{ $labels.instance }}{{ end }}"
           description: "Prometheus has not been able to scrape the NetworkDoctor agent at {{ $labels.instance }} for 5 minutes."
 
       - alert: NetworkDoctorTCPRetransmitBurstHigh
@@ -41,7 +41,7 @@ groups:
           rule_id: smoke-1
           scenario: smoke-tcp-retransmit-burst
         annotations:
-          summary: "TCP retransmit bursts on {{ $labels.node }}{{ $labels.instance }}"
+          summary: "TCP retransmit bursts on {{ if $labels.node }}{{ $labels.node }}{{ else }}{{ $labels.instance }}{{ end }}"
           description: "{{ $value | printf \"%.0f\" }} TCP retransmit bursts in the last 5m on {{ $labels.instance }}."
 
       - alert: NetworkDoctorTCPConnectFailuresHigh
@@ -53,7 +53,7 @@ groups:
           rule_id: smoke-2
           scenario: smoke-tcp-connect-failures
         annotations:
-          summary: "TCP connect failures on {{ $labels.node }}{{ $labels.instance }}"
+          summary: "TCP connect failures on {{ if $labels.node }}{{ $labels.node }}{{ else }}{{ $labels.instance }}{{ end }}"
           description: "{{ $value | printf \"%.0f\" }} failed TCP connect attempts in the last 5m on {{ $labels.instance }}."
 
       - alert: NetworkDoctorDNSSlowHigh
@@ -65,7 +65,7 @@ groups:
           rule_id: smoke-3
           scenario: smoke-dns-slow
         annotations:
-          summary: "Slow DNS responses on {{ $labels.node }}{{ $labels.instance }}"
+          summary: "Slow DNS responses on {{ if $labels.node }}{{ $labels.node }}{{ else }}{{ $labels.instance }}{{ end }}"
           description: "{{ $value | printf \"%.0f\" }} DNS responses slower than the agent threshold in the last 5m on {{ $labels.instance }}."
 
       - alert: NetworkDoctorDNSRcodeErrorsHigh
@@ -77,7 +77,7 @@ groups:
           rule_id: smoke-4
           scenario: smoke-dns-rcode-errors
         annotations:
-          summary: "DNS error rcodes on {{ $labels.node }}{{ $labels.instance }}"
+          summary: "DNS error rcodes on {{ if $labels.node }}{{ $labels.node }}{{ else }}{{ $labels.instance }}{{ end }}"
           description: "{{ $value | printf \"%.0f\" }} DNS responses with non-zero rcode in the last 5m on {{ $labels.instance }}."
 
       # NetworkDoctorRunqueueLatencyHigh is intentionally NOT enabled yet.
