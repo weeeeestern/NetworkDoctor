@@ -156,6 +156,37 @@ ruleConfigMap:
   name: ""
 
 # ---------------------------------------------------------------------------
+# Alertmanager routing (Prometheus Operator AlertmanagerConfig CR)
+# ---------------------------------------------------------------------------
+# Renders an AlertmanagerConfig in the release namespace that routes every
+# alert carrying source="networkdoctor" to the backend webhook. Requires the
+# Alertmanager CR to select it (kube-prometheus-stack default selector {} =
+# all). The Operator adds a namespace="<release ns>" matcher automatically
+# (alertmanagerConfigMatcherStrategy OnNamespace), which is fine because the
+# agent's alerts carry the ServiceMonitor's namespace label.
+# Without the Operator, use the raw examples in deploy/alertmanager/.
+alertmanagerConfig:
+  # VERIFY: enable only if alertmanagerconfigs.monitoring.coreos.com exists
+  # and backend.enabled is true.
+  enabled: false
+  # Labels required by the Alertmanager CR's alertmanagerConfigSelector.
+  labels: {}
+  receiverName: networkdoctor-backend
+  matchers:
+    - name: source
+      value: networkdoctor
+      matchType: "="
+  # Stable grouping keys; missing labels are ignored by Alertmanager.
+  groupBy: [alertname, namespace, service, node, rule_id]
+  groupWait: 30s
+  groupInterval: 2m
+  repeatInterval: 4h
+  # true: the alert also continues to sibling routes (Slack, email, ...).
+  continue: true
+  # Override the webhook URL; default is the in-cluster backend Service.
+  webhookURL: ""
+
+# ---------------------------------------------------------------------------
 # Backend (Alertmanager webhook -> incidents)
 # ---------------------------------------------------------------------------
 backend:

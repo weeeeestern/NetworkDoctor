@@ -48,6 +48,7 @@ jobs:
           helm template nd "$CHART" -n networkdoctor \
             --set serviceMonitor.enabled=true --set prometheusRule.enabled=true \
             --set serviceMonitor.labels.release=kps --set prometheusRule.labels.release=kps \
+            --set alertmanagerConfig.enabled=true \
             > /tmp/operator.yaml
           helm template nd "$CHART" -n networkdoctor \
             --set ruleConfigMap.enabled=true --set agent.hostNetwork=false \
@@ -55,6 +56,8 @@ jobs:
             > /tmp/fallback.yaml
           grep -q 'kind: ServiceMonitor' /tmp/operator.yaml
           grep -q 'kind: PrometheusRule' /tmp/operator.yaml
+          grep -q 'kind: AlertmanagerConfig' /tmp/operator.yaml
+          ! grep -q 'kind: AlertmanagerConfig' /tmp/default.yaml
           grep -q 'kind: ConfigMap' /tmp/fallback.yaml
           grep -q 'kind: PersistentVolumeClaim' /tmp/fallback.yaml
           ! grep -q 'kind: ServiceMonitor' /tmp/default.yaml

@@ -4,7 +4,10 @@ Alertmanager owns grouping, deduplication and retry delivery. The backend
 only needs one route that forwards every alert carrying `source="networkdoctor"`
 to `POST /webhooks/alertmanager`.
 
-Pick the file that matches how Alertmanager is managed on the cluster:
+With the Prometheus Operator, the chart renders the route itself
+(`templates/alertmanagerconfig.yaml`, toggle `alertmanagerConfig.enabled`), so
+Argo CD delivers it together with the backend. The files here are for
+clusters without the Operator, or for reading what the chart produces:
 
 | File | When |
 | --- | --- |

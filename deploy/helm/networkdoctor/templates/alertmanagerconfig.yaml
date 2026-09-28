@@ -1,0 +1,33 @@
+{{- if and .Values.backend.enabled .Values.alertmanagerConfig.enabled }}
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: {{ include "networkdoctor.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "networkdoctor.labels" . | nindent 4 }}
+    {{- with .Values.alertmanagerConfig.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  route:
+    receiver: {{ .Values.alertmanagerConfig.receiverName }}
+    {{- with .Values.alertmanagerConfig.matchers }}
+    matchers:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with .Values.alertmanagerConfig.groupBy }}
+    groupBy:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    groupWait: {{ .Values.alertmanagerConfig.groupWait }}
+    groupInterval: {{ .Values.alertmanagerConfig.groupInterval }}
+    repeatInterval: {{ .Values.alertmanagerConfig.repeatInterval }}
+    continue: {{ .Values.alertmanagerConfig.continue }}
+  receivers:
+    - name: {{ .Values.alertmanagerConfig.receiverName }}
+      webhookConfigs:
+        - url: {{ .Values.alertmanagerConfig.webhookURL | default (include "networkdoctor.backend.webhookURL" .) | quote }}
+          sendResolved: true
+          maxAlerts: 0
+{{- end }}

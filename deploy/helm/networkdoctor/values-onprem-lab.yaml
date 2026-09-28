@@ -27,11 +27,14 @@ prometheusRule:
 ruleConfigMap:
   enabled: false
 
+# Alertmanager CR selector is {} (all AlertmanagerConfigs), so no labels needed.
+alertmanagerConfig:
+  enabled: true
+
 backend:
-  # The backend image is published by backend-image.yml on a main push or a
-  # manual workflow_dispatch run. Flip to true once
-  # docker.io/7910trio/networkdoctor-backend:edge exists.
-  enabled: false
+  # docker.io/7910trio/networkdoctor-backend:edge exists since the PR #13
+  # merge (backend-image.yml on main push, 2026-09-28).
+  enabled: true
   config:
     prometheusURL: http://prometheus-stack-kube-prom-prometheus.monitoring.svc:9090
   persistence:
