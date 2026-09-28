@@ -1,66 +1,57 @@
-# Argo CD (on-prem lab)
+# Argo CD (on-prem lab): app-of-apps
 
-One `Application` (`networkdoctor-application.yaml`) renders the Helm chart
-at `deploy/helm/networkdoctor` with `values-onprem-lab.yaml`. Sync is manual:
-Argo CD shows drift, a person applies it.
+Layout mirrors a bootstrap/apps repo:
 
-## Before the first sync: remove the hand-applied objects
-
-The cluster already runs the agent from raw manifests
-(`~/k8s-network-doctor/*.yaml` on the control plane). They use the same names
-the chart will produce (`networkdoctor-agent`), and two of them have immutable
-fields (DaemonSet `spec.selector`, Service `spec.clusterIP`) that differ from
-the chart. Argo CD cannot adopt them; the sync would fail with
-"field is immutable". Delete them first (about one minute of missing metrics):
-
-```bash
-kubectl -n networkdoctor delete servicemonitor networkdoctor-agent
-kubectl -n networkdoctor delete service networkdoctor-agent
-kubectl -n networkdoctor delete daemonset networkdoctor-agent
-kubectl -n networkdoctor get all        # expect: No resources found
+```text
+deploy/
+  argocd/root-application.yaml    the ONE Application registered by hand
+  bootstrap/                      root chart: renders child Applications
+    templates/_application.yaml   applications[] -> Application CRs
+    onprem-lab.yaml               environment file: destination, repo, app list
+  helm/networkdoctor/             child chart (agent, backend, PrometheusRule, AlertmanagerConfig)
+  helm/networkdoctor-demo/        child chart (Cat Shop + fortio)
 ```
 
-## Register the Application
+Sync is manual at every level. Argo CD shows drift; a person applies it.
+
+## Register the root (once)
 
 ```bash
-kubectl apply -f deploy/argocd/networkdoctor-application.yaml
-kubectl -n argocd get application networkdoctor     # SYNC STATUS: OutOfSync, HEALTH: Missing
+kubectl apply -f https://raw.githubusercontent.com/weeeeestern/NetworkDoctor/main/deploy/argocd/root-application.yaml
 ```
 
-Open Argo CD (`https://192.168.0.17:32163` or via Tailscale
-`https://100.122.175.35:32163`), log in as `admin`, open the `networkdoctor`
-app. Review the diff (App Diff), then **Sync** → **Synchronize**. Nothing is
-applied until that click.
+In the UI, `networkdoctor-root` appears OutOfSync. Sync it: that creates (or
+adopts) the child Applications `networkdoctor` and `networkdoctor-demo`.
+Then open each child and sync it separately.
 
-CLI alternative once the `argocd` binary is installed:
+Adoption note: an Application created earlier by hand with the same name
+(`networkdoctor`) is simply taken over by the root sync. Application CRs have
+no immutable fields, so the workloads keep running; only the owner changes.
+
+## Adding a child app
+
+1. Create the chart under `deploy/helm/<name>/`.
+2. Add `- name: <name>` (plus `namespace`, `valueFiles` if needed) to
+   `deploy/bootstrap/onprem-lab.yaml`.
+3. Commit to `main`, sync the root (new child appears), sync the child.
+
+## Verify after the child sync
 
 ```bash
-argocd login 192.168.0.17:32163 --insecure --username admin
-argocd app diff networkdoctor
-argocd app sync networkdoctor
-```
-
-## Verify after sync
-
-```bash
-kubectl -n networkdoctor get ds,svc,servicemonitor,prometheusrule
-kubectl -n networkdoctor logs ds/networkdoctor-agent --tail=5
-# Prometheus (NodePort 30090): targets up and the TC-path counter moving
-curl -sG 'http://192.168.0.17:30090/api/v1/query' --data-urlencode 'query=up{job="networkdoctor-agent"}'
+kubectl -n networkdoctor get ds,deploy,svc,servicemonitor,prometheusrule,alertmanagerconfig
+kubectl -n networkdoctor-demo get deploy,svc,servicemonitor
+curl -sG 'http://192.168.0.17:30090/api/v1/query' --data-urlencode 'query=up{job=~"networkdoctor-agent|catshop"}'
 curl -sG 'http://192.168.0.17:30090/api/v1/query' --data-urlencode 'query=increase(ebpf_udp_packets_total[5m])'
-curl -s 'http://192.168.0.17:30090/api/v1/rules' | grep -o 'NetworkDoctor[A-Za-z]*' | sort -u
 ```
 
-`increase(ebpf_udp_packets_total[5m])` must be well above zero on every
-worker. It was near zero with the old image, which is the sign that the TC
-hook was not seeing host traffic.
+## Rollback
 
-## Later changes
+Sync a previous revision from the child's History tab, or revert the commit
+on `main` and sync. Deleting a child Application (it carries the resources
+finalizer) deletes its workloads; deleting the root does not cascade.
 
-Every Git change to `deploy/helm/networkdoctor/**` on the tracked branch makes
-the app OutOfSync. Nothing happens until someone syncs. To roll back, sync a
-previous revision from the History tab, or revert the commit and sync.
+## History
 
-`targetRevision` is `main`, so a change is deployable only after its PR is
-merged. That is deliberate: the branch that Argo CD watches is the branch
-that review protects.
+Before the root chart existed, `networkdoctor` and `networkdoctor-demo` were
+registered from standalone manifests in this directory. Those files were
+removed once the root took over; the rendered children are equivalent.

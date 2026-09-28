@@ -204,10 +204,12 @@ closes them on SIGTERM). The clsact qdisc stays on the NIC; it is inert.
 
 ## 6. Argo CD
 
-`deploy/argocd/networkdoctor-application.yaml` points at the chart path with
-`values-onprem-lab.yaml`. It has no `syncPolicy.automated`, so Argo CD only
-reports drift; a person syncs. `targetRevision` tracks the PR branch until
-the merge, then `main`.
+App-of-apps: `deploy/argocd/root-application.yaml` is the only object
+registered by hand. It renders `deploy/bootstrap` (root chart) with
+`onprem-lab.yaml`, which creates one child Application per entry of its
+`applications:` list (`networkdoctor`, `networkdoctor-demo`). No level has
+`syncPolicy.automated`; a person syncs root and children. See
+`deploy/argocd/README.md`.
 
 Helm release name and namespace are the same as a direct `helm install`, so
 the chart needs no changes for Argo CD.

@@ -41,6 +41,13 @@ jobs:
       - name: helm lint (lab values)
         run: helm lint "$CHART" -f "$CHART/values-onprem-lab.yaml"
 
+      - name: helm lint + template (bootstrap root chart)
+        run: |
+          helm lint deploy/bootstrap -f deploy/bootstrap/onprem-lab.yaml
+          helm template root deploy/bootstrap -f deploy/bootstrap/onprem-lab.yaml > /tmp/root.yaml
+          [ "$(grep -c '^kind: Application' /tmp/root.yaml)" -ge 2 ]
+          ! grep -q 'automated' /tmp/root.yaml
+
       - name: helm lint + template (demo chart)
         run: |
           helm lint deploy/helm/networkdoctor-demo

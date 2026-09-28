@@ -1,0 +1,28 @@
+# Root Application (app-of-apps). This is the only Argo CD object a person
+# registers by hand. Syncing it renders deploy/bootstrap with onprem-lab.yaml,
+# which creates the child Applications (networkdoctor, networkdoctor-demo).
+# The children are then synced one by one; nothing is automated.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: networkdoctor-root
+  namespace: argocd
+  # No resources-finalizer here: deleting the root must not cascade into
+  # deleting every child Application and their workloads by accident.
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/weeeeestern/NetworkDoctor.git
+    targetRevision: main
+    path: deploy/bootstrap
+    helm:
+      releaseName: networkdoctor-root
+      valueFiles:
+        - onprem-lab.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    # Manual sync only (no `automated:`).
+    syncOptions:
+      - ServerSideApply=true

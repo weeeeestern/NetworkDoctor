@@ -1,0 +1,6 @@
+apiVersion: v2
+name: bootstrap
+description: Argo CD app-of-apps root for NetworkDoctor. Renders one Argo CD Application per entry in the environment values file; the child Applications point at the charts under deploy/helm/.
+type: application
+version: 0.1.0
+appVersion: "argocd"

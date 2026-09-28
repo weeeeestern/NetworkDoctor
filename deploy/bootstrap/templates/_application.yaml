@@ -1,0 +1,53 @@
+{{/*
+Render one Argo CD Application per entry of .Values.applications.
+
+Per-app fields (only `name` is required):
+  name         Application name; also the default chart directory and namespace.
+  path         chart path in the repo   (default: deploy/helm/<name>)
+  namespace    destination namespace    (default: <name>)
+  releaseName  Helm release name        (default: <name>)
+  valueFiles   list of values files     (default: none -> chart values.yaml only)
+  ignoreDifferences  passed through verbatim
+*/}}
+{{- define "application" -}}
+{{- $root := . }}
+{{- range $application := .Values.applications }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ $application.name }}
+  namespace: argocd
+  labels:
+    networkdoctor.io/env: {{ $root.Values.env }}
+    app.kubernetes.io/part-of: networkdoctor
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: {{ $root.Values.project | default "default" }}
+  destination:
+    server: {{ $root.Values.spec.destination.server }}
+    namespace: {{ $application.namespace | default $application.name }}
+  source:
+    repoURL: {{ $root.Values.source.repoURL }}
+    targetRevision: {{ $root.Values.source.targetRevision | default "main" }}
+    path: {{ $application.path | default (printf "deploy/helm/%s" $application.name) }}
+    helm:
+      releaseName: {{ $application.releaseName | default $application.name }}
+      {{- with $application.valueFiles }}
+      valueFiles:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- with $application.ignoreDifferences }}
+  ignoreDifferences:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  syncPolicy:
+    {{- with $root.Values.syncPolicy }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+{{- end }}
+{{- end }}

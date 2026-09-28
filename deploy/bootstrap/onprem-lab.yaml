@@ -1,0 +1,32 @@
+# On-prem lab environment: which child Applications the root app creates.
+#
+# Adding a chart under deploy/helm/ is not enough to deploy it; it must also be
+# listed here (same rule as the company bootstrap). The root Application
+# (deploy/argocd/root-application.yaml) renders this file.
+
+env: onprem-lab
+project: default
+
+spec:
+  destination:
+    # In-cluster Argo CD deploys to its own cluster.
+    server: https://kubernetes.default.svc
+
+source:
+  repoURL: https://github.com/weeeeestern/NetworkDoctor.git
+  targetRevision: main
+
+# Empty on purpose: no `automated:` block, so every child Application is
+# manual-sync. The root app itself is also manual (see root-application.yaml).
+syncPolicy: {}
+
+applications:
+  # eBPF agent DaemonSet + backend + Prometheus/Alertmanager wiring
+  - name: networkdoctor
+    namespace: networkdoctor
+    valueFiles:
+      - values-onprem-lab.yaml
+
+  # Cat Shop (podinfo) demo workload + fortio load
+  - name: networkdoctor-demo
+    namespace: networkdoctor-demo
