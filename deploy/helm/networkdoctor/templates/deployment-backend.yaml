@@ -65,6 +65,16 @@ spec:
               value: {{ .Values.backend.config.prometheusURL | quote }}
             - name: ND_HOLMES_URL
               value: {{ .Values.backend.config.holmesURL | quote }}
+            - name: ND_HOLMES_MODEL
+              value: {{ .Values.backend.config.holmesModel | quote }}
+            - name: ND_HOLMES_TIMEOUT
+              value: {{ .Values.backend.config.holmesTimeout | quote }}
+            - name: ND_HOLMES_AUTO
+              value: {{ .Values.backend.config.holmesAuto | quote }}
+            - name: ND_HOLMES_SKIP_RULE_PREFIXES
+              value: {{ .Values.backend.config.holmesSkipRulePrefixes | quote }}
+            - name: ND_WORKERS
+              value: {{ .Values.backend.config.workers | quote }}
             - name: ND_EVIDENCE_WINDOW
               value: {{ .Values.backend.config.evidenceWindow | quote }}
             - name: ND_MAX_BODY_BYTES

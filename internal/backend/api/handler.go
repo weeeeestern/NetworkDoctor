@@ -6,7 +6,8 @@
 //	POST /webhooks/alertmanager
 //	GET  /incidents
 //	GET  /incidents/{id}
-//	POST /incidents/{id}/holmes   (reserved; returns 501 until the Holmes milestone)
+//	GET  /incidents/{id}/report.md
+//	POST /incidents/{id}/holmes   (manual re-investigation)
 package api
 
 import (
@@ -19,7 +20,13 @@ import (
 
 	"networkdoctor-agent/internal/backend/alertmanager"
 	"networkdoctor-agent/internal/backend/incident"
+	"networkdoctor-agent/internal/backend/report"
 )
+
+// Investigator schedules background investigations. nil disables them.
+type Investigator interface {
+	Enqueue(id string, force bool) error
+}
 
 // Options configures the handler.
 type Options struct {
@@ -28,6 +35,9 @@ type Options struct {
 	MaxBodyBytes int64
 	Now          func() time.Time
 	Logger       *log.Logger
+	Investigator Investigator
+	// AutoInvestigate enqueues new firing incidents automatically.
+	AutoInvestigate bool
 }
 
 type handler struct {
@@ -36,6 +46,8 @@ type handler struct {
 	maxBodyBytes int64
 	now          func() time.Time
 	log          *log.Logger
+	inv          Investigator
+	auto         bool
 }
 
 // New returns the HTTP handler for the backend.
@@ -46,6 +58,8 @@ func New(opts Options) http.Handler {
 		maxBodyBytes: opts.MaxBodyBytes,
 		now:          opts.Now,
 		log:          opts.Logger,
+		inv:          opts.Investigator,
+		auto:         opts.AutoInvestigate,
 	}
 	if h.now == nil {
 		h.now = time.Now
@@ -62,7 +76,8 @@ func New(opts Options) http.Handler {
 	mux.HandleFunc("POST /webhooks/alertmanager", h.alertmanagerWebhook)
 	mux.HandleFunc("GET /incidents", h.listIncidents)
 	mux.HandleFunc("GET /incidents/{id}", h.getIncident)
-	mux.HandleFunc("POST /incidents/{id}/holmes", h.holmesNotImplemented)
+	mux.HandleFunc("GET /incidents/{id}/report.md", h.reportMarkdown)
+	mux.HandleFunc("POST /incidents/{id}/holmes", h.holmesRetry)
 	return mux
 }
 
@@ -134,6 +149,11 @@ func (h *handler) alertmanagerWebhook(w http.ResponseWriter, r *http.Request) {
 			resp.Updated++
 		}
 		resp.Incidents = append(resp.Incidents, inc.IncidentID)
+		if created && !a.IsResolved() && h.auto && h.inv != nil {
+			if err := h.inv.Enqueue(inc.IncidentID, false); err != nil {
+				h.log.Printf("webhook: enqueue investigation %s: %v", inc.IncidentID, err)
+			}
+		}
 		h.log.Printf("webhook: %s incident=%s alert=%s status=%s created=%t deliveries=%d",
 			payload.Receiver, inc.IncidentID, a.Labels["alertname"], a.Status, created, inc.DeliveryCount)
 	}
@@ -199,8 +219,9 @@ func (h *handler) getIncident(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, inc)
 }
 
-func (h *handler) holmesNotImplemented(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.store.Get(r.PathValue("id")); err != nil {
+func (h *handler) holmesRetry(w http.ResponseWriter, r *http.Request) {
+	inc, err := h.store.Get(r.PathValue("id"))
+	if err != nil {
 		if errors.Is(err, incident.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "incident not found")
 			return
@@ -208,7 +229,33 @@ func (h *handler) holmesNotImplemented(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to read incident")
 		return
 	}
-	writeError(w, http.StatusNotImplemented, "HolmesGPT integration is not implemented in this milestone")
+	if h.inv == nil {
+		writeError(w, http.StatusServiceUnavailable, "HolmesGPT is not configured (ND_HOLMES_URL is empty)")
+		return
+	}
+	if inc.HolmesStatus == "running" {
+		writeError(w, http.StatusConflict, "an investigation is already running for this incident")
+		return
+	}
+	if err := h.inv.Enqueue(inc.IncidentID, true); err != nil {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"incident_id": inc.IncidentID, "status": "queued"})
+}
+
+func (h *handler) reportMarkdown(w http.ResponseWriter, r *http.Request) {
+	inc, err := h.store.Get(r.PathValue("id"))
+	if err != nil {
+		if errors.Is(err, incident.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "incident not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to read incident")
+		return
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	_, _ = w.Write([]byte(report.Markdown(inc)))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

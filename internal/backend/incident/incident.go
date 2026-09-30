@@ -55,12 +55,20 @@ type Incident struct {
 	EvidenceMetrics     []Evidence           `json:"evidence_metrics"`
 	RecommendedActions  []string             `json:"recommended_actions"`
 
-	// HolmesResult holds the structured RCA returned by HolmesGPT. It stays
-	// nil until the Holmes milestone; HolmesAttempts guards the once-per-key
-	// call rule required by the handoff.
-	HolmesResult   any        `json:"holmes_result"`
-	HolmesAttempts int        `json:"holmes_attempts"`
-	HolmesLastAt   *time.Time `json:"holmes_last_at,omitempty"`
+	// HolmesResult is the parsed skill output schema (rule_id, root_cause,
+	// trigger_evidence, ...). HolmesAttempts enforces one automatic call per
+	// incident; only POST /incidents/{id}/holmes can trigger another.
+	HolmesResult   map[string]any `json:"holmes_result"`
+	HolmesAttempts int            `json:"holmes_attempts"`
+	HolmesLastAt   *time.Time     `json:"holmes_last_at,omitempty"`
+	// HolmesStatus: "" (never), queued, running, done, failed, skipped.
+	HolmesStatus   string `json:"holmes_status,omitempty"`
+	HolmesModel    string `json:"holmes_model,omitempty"`
+	HolmesError    string `json:"holmes_error,omitempty"`
+	HolmesAnalysis string `json:"holmes_analysis,omitempty"`
+	// HolmesToolCalls is how many tool calls Holmes made; a cheap signal of
+	// how hard it had to look.
+	HolmesToolCalls int `json:"holmes_tool_calls,omitempty"`
 
 	RecoveryStatus string `json:"recovery_status"`
 

@@ -35,8 +35,18 @@ backend:
   # docker.io/7910trio/networkdoctor-backend:edge exists since the PR #13
   # merge (backend-image.yml on main push, 2026-09-28).
   enabled: true
+  image:
+    # The lab tracks the moving `edge` tag; Always makes each rollout pull the
+    # latest main build instead of a node-cached one.
+    pullPolicy: Always
   config:
     prometheusURL: http://prometheus-stack-kube-prom-prometheus.monitoring.svc:9090
+    # HolmesGPT child app (deploy/helm/holmesgpt), Service holmesgpt-holmes:80.
+    holmesURL: http://holmesgpt-holmes.holmesgpt.svc:80
+    holmesModel: gateway-sonnet
+    # Lab only: Rule 1-8 alerts do not exist yet, so smoke alerts are the only
+    # way to exercise the chain. Put "smoke-" back once real rules land.
+    holmesSkipRulePrefixes: ""
   persistence:
     # No StorageClass on this cluster (kubectl get storageclass -> none).
     enabled: false

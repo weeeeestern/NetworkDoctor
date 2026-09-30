@@ -9,6 +9,7 @@ require (
 	github.com/prometheus/client_golang v1.22.0
 	github.com/vishvananda/netlink v1.3.1
 	golang.org/x/sys v0.33.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

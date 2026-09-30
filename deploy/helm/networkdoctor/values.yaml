@@ -207,9 +207,20 @@ backend:
     annotations: {}
 
   config:
-    # Optional now; consumed by the evidence/Holmes milestones.
+    # Prometheus for the evidence snapshot (empty = no evidence).
     prometheusURL: ""
+    # HolmesGPT API (empty = no automatic RCA).
     holmesURL: ""
+    # Holmes modelList name; empty = Holmes default (its MODEL env).
+    holmesModel: ""
+    holmesTimeout: 10m
+    # Investigate new firing incidents automatically (once per incident).
+    holmesAuto: "true"
+    # rule_id prefixes never investigated automatically. Smoke rules only
+    # prove the pipeline and have no matching skill.
+    holmesSkipRulePrefixes: "smoke-"
+    workers: "1"
+    # Evidence and investigation window: startsAt +/- this.
     evidenceWindow: 15m
     maxBodyBytes: "4194304"
   extraEnv: []

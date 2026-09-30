@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -218,8 +219,15 @@ func TestReadEndpoints(t *testing.T) {
 
 	resp, _ = http.Post(srv.URL+"/incidents/"+id+"/holmes", "application/json", nil)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusNotImplemented {
-		t.Errorf("POST /incidents/{id}/holmes = %d, want 501", resp.StatusCode)
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("POST /incidents/{id}/holmes without Holmes = %d, want 503", resp.StatusCode)
+	}
+
+	resp, _ = http.Get(srv.URL + "/incidents/" + id + "/report.md")
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "# NetworkDoctorTCPRetransmitBurstHigh") {
+		t.Errorf("GET report.md = %d %q", resp.StatusCode, string(body)[:min(80, len(body))])
 	}
 
 	resp, _ = http.Get(srv.URL + "/healthz")
@@ -250,5 +258,28 @@ func TestAffectedNodesFallsBackToInstanceHost(t *testing.T) {
 	}
 	if len(inc.AffectedNodes) != 1 || inc.AffectedNodes[0] != "192.168.0.18" {
 		t.Errorf("affected_nodes = %v, want [192.168.0.18]", inc.AffectedNodes)
+	}
+}
+
+type recordingInvestigator struct{ ids []string }
+
+func (r *recordingInvestigator) Enqueue(id string, force bool) error {
+	r.ids = append(r.ids, id)
+	return nil
+}
+
+func TestWebhookEnqueuesOnlyNewFiringIncidents(t *testing.T) {
+	store, _ := incident.NewFileStore(t.TempDir())
+	inv := &recordingInvestigator{}
+	srv := httptest.NewServer(New(Options{Store: store, Investigator: inv, AutoInvestigate: true}))
+	defer srv.Close()
+	url := srv.URL + "/webhooks/alertmanager"
+
+	post(t, url, firingPayload) // new -> enqueue
+	post(t, url, firingPayload) // redelivery -> no enqueue
+	resolved := strings.ReplaceAll(firingPayload, `"status": "firing"`, `"status": "resolved"`)
+	post(t, url, resolved) // resolved -> no enqueue
+	if len(inv.ids) != 1 {
+		t.Fatalf("enqueued %d times, want 1: %v", len(inv.ids), inv.ids)
 	}
 }

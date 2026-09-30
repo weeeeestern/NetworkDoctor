@@ -63,6 +63,32 @@ func (s *FileStore) Upsert(key string, mutate func(existing *Incident) (*Inciden
 	return inc, created, nil
 }
 
+// ErrNoChange can be returned by an Update mutation to skip the write.
+var ErrNoChange = errors.New("no change")
+
+// Update loads an existing incident, applies mutate and saves the result
+// under the store lock. If mutate returns ErrNoChange the incident is
+// returned unchanged and nothing is written.
+func (s *FileStore) Update(id string, mutate func(inc *Incident) error) (*Incident, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	inc, err := s.readLocked(id)
+	if err != nil {
+		return nil, err
+	}
+	if err := mutate(inc); err != nil {
+		if errors.Is(err, ErrNoChange) {
+			return inc, nil
+		}
+		return nil, err
+	}
+	if err := s.writeLocked(inc); err != nil {
+		return nil, err
+	}
+	return inc, nil
+}
+
 // Save writes an incident unconditionally.
 func (s *FileStore) Save(inc *Incident) error {
 	s.mu.Lock()
