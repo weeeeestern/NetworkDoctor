@@ -44,6 +44,12 @@ holmes:
     # No Robusta SaaS in this deployment.
     - name: ROBUSTA_AI
       value: "false"
+    # Upper bound on tool-calling steps per investigation. Holmes 0.38.1
+    # defaults to 100 (holmes/config.py) and reads MAX_STEPS from the env when
+    # no config file is mounted. A fake rule-8 alert with no data ran 80 steps
+    # (332 s) on 2026-09-30; real investigations finished in 23-32 steps.
+    - name: MAX_STEPS
+      value: "20"
 
   toolsets:
     kubernetes/core:
