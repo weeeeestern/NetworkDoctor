@@ -1,6 +1,6 @@
 ---
 name: node-localized-failure
-description: Investigate Network Doctor Rule 6 alerts for a Kubernetes network failure localized to one node by comparing node CPU, iowait, SoftIRQ, NIC drops, conntrack, eBPF latency, pod placement, Cilium health, and peer nodes.
+description: Use for NetworkDoctor alerts labeled rule_id=rule-6 or scenario=node-localized-failure. Investigate Network Doctor Rule 6 alerts for a Kubernetes network failure localized to one node by comparing node CPU, iowait, SoftIRQ, NIC drops, conntrack, eBPF latency, pod placement, Cilium health, and peer nodes.
 last_updated: 2026-09-30
 ---
 
@@ -55,6 +55,7 @@ The agent exports these names (checked in Prometheus on the on-prem lab, 2026-09
 - Gauges: `ebpf_tcp_connections_active`, `ebpf_tcp_connections_time_wait`.
 - Histograms (`_bucket`/`_sum`/`_count`, `le` in powers of two): `ebpf_tcp_srtt_microseconds` (µs), `ebpf_tcp_cwnd` (segments), `ebpf_dns_query_latency` (µs), `ebpf_runqlat` (µs), `ebpf_udp_session_duration` (µs).
 - Granularity: every `ebpf_*` series is **per node only** (labels `node`, `instance`, `pod` of the agent). There are no per-flow, per-pod or per-service labels such as `src_pod`/`dst_pod`; use Hubble or application metrics for flow-level attribution.
+- `hubble_*` and `cilium_*` series have **no `node` label**. They carry `instance` (the node IP and port) and `pod` (the Cilium agent pod). Map a node to its Cilium pod with Kubernetes first, then filter on `pod` or `instance`; filtering on `node` returns nothing.
 - There is no DNS timeout counter. `ebpf_dns_slow_total` counts responses slower than the agent threshold (default 50 ms) and is the closest proxy.
 - Convert µs histograms before comparing to seconds: `histogram_quantile(0.99, sum by (le, node) (rate(ebpf_runqlat_bucket[5m]))) / 1e6`.
 
