@@ -1,0 +1,47 @@
+# LiteLLM Proxy model list for the on-prem lab.
+#
+# Clients (HolmesGPT) reference the `model_name` on the left; the provider
+# behind it can be swapped here without touching anything in the cluster.
+# Provider keys come from .env (os.environ/...), never from this file.
+
+model_list:
+  # --- Anthropic (default) ---------------------------------------------------
+  # Ids verified against GET https://api.anthropic.com/v1/models (2026-09-30).
+  - model_name: claude-sonnet
+    litellm_params:
+      model: anthropic/claude-sonnet-5-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: claude-haiku
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # --- OpenAI ----------------------------------------------------------------
+  # Ids verified against GET https://api.openai.com/v1/models (2026-09-30).
+  - model_name: gpt-luna
+    litellm_params:
+      model: openai/gpt-5.6-luna
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: gpt-6-luna
+    litellm_params:
+      model: openai/gpt-6-luna
+      api_key: os.environ/OPENAI_API_KEY
+
+  # --- AWS Bedrock (uncomment; needs AWS creds/region in .env) ----------------
+  # - model_name: bedrock-sonnet
+  #   litellm_params:
+  #     model: bedrock/global.anthropic.claude-sonnet-4-5-20250929-v1:0
+  #     aws_region_name: os.environ/AWS_REGION
+
+litellm_settings:
+  # Route Holmes' generic requests to a stable alias.
+  drop_params: true
+  # Retries against transient provider errors.
+  num_retries: 2
+  request_timeout: 120
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  # Keep the admin UI and key management on, but only reachable on the LAN.
+  # (The VM has no public interface; nothing here is exposed to the internet.)

@@ -1,0 +1,51 @@
+# LLM Gateway for the on-prem lab: LiteLLM Proxy on a VM outside the cluster.
+#
+# Why outside the cluster: provider API keys stay on this VM. The cluster
+# (HolmesGPT, later the backend) only holds a LiteLLM virtual key and talks
+# OpenAI-compatible HTTP to http://<vm-ip>:4000/v1.
+#
+# Usage on the VM:
+#   cp .env.example .env   # fill in keys
+#   docker compose up -d
+#   curl -H "Authorization: Bearer $LITELLM_MASTER_KEY" http://localhost:4000/v1/models
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.103.0
+    container_name: litellm
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:4000/health/liveliness')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  # Postgres is what makes virtual keys, per-key budgets and usage logs
+  # persist across restarts. Small and local; no external exposure.
+  db:
+    image: postgres:16-alpine
+    container_name: litellm-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - litellm-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  litellm-pg: {}
