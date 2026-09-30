@@ -1,0 +1,110 @@
+# HolmesGPT (official chart 0.38.1 as subchart `holmes`) for NetworkDoctor.
+#
+# Wiring:
+#   LLM      -> OpenAI-compatible gateway (LiteLLM on a VM); only a gateway
+#               virtual key reaches the cluster, via Secret `holmes-llm`.
+#   Metrics  -> in-cluster Prometheus (kube-prometheus-stack).
+#   Skills   -> skills/<scenario>/SKILL.md from this Git repo, fetched by an
+#               init container at pod start (Helm cannot read files outside
+#               the chart directory, and skills/ is the single source).
+#
+# Environment-specific values (gateway URL, Prometheus URL, git ref) live in
+# values-onprem-lab.yaml.
+
+holmes:
+  # Secret created out of band (never in Git):
+  #   kubectl -n holmesgpt create secret generic holmes-llm --from-literal=LLM_GATEWAY_KEY=<virtual key>
+  # Every key becomes an env var on the Holmes pod.
+  extraEnvVarsSecrets:
+    - holmes-llm
+
+  # Models are gateway aliases. `openai/` tells LiteLLM (inside Holmes) to
+  # speak the OpenAI protocol to api_base; the gateway maps the alias to the
+  # real provider model. Switch models with the MODEL env var below.
+  modelList:
+    gateway-sonnet:
+      model: openai/claude-sonnet
+      api_base: http://llm-gateway.invalid:4000/v1
+      api_key: envRef:LLM_GATEWAY_KEY
+      temperature: 0
+    gateway-haiku:
+      model: openai/claude-haiku
+      api_base: http://llm-gateway.invalid:4000/v1
+      api_key: envRef:LLM_GATEWAY_KEY
+      temperature: 0
+    gateway-luna:
+      model: openai/gpt-luna
+      api_base: http://llm-gateway.invalid:4000/v1
+      api_key: envRef:LLM_GATEWAY_KEY
+
+  additionalEnvVars:
+    # Default model for /api/chat when the request does not name one.
+    - name: MODEL
+      value: gateway-sonnet
+    # No Robusta SaaS in this deployment.
+    - name: ROBUSTA_AI
+      value: "false"
+
+  toolsets:
+    kubernetes/core:
+      enabled: true
+    kubernetes/logs:
+      enabled: true
+    prometheus/metrics:
+      enabled: true
+      config:
+        prometheus_url: http://prometheus.invalid:9090
+        timeout: 30
+    skills:
+      enabled: true
+    # Off: no Robusta platform, and investigations must not reach the internet.
+    robusta:
+      enabled: false
+    internet:
+      enabled: false
+    connectivity_check:
+      enabled: false
+    bash:
+      enabled: true
+      config:
+        builtin_allowlist: "extended"
+
+  customSkillPaths:
+    - /etc/holmes/networkdoctor-skills
+
+  initContainers:
+    - name: fetch-skills
+      image: alpine/git:2.49.1
+      env:
+        - name: SKILLS_REPO
+          value: https://github.com/weeeeestern/NetworkDoctor.git
+        - name: SKILLS_REF
+          value: main
+      command:
+        - sh
+        - -c
+        - |
+          set -eu
+          git clone --quiet --depth 1 --filter=blob:none --sparse --branch "$SKILLS_REF" "$SKILLS_REPO" /tmp/repo
+          cd /tmp/repo
+          git sparse-checkout set skills
+          cp -r skills/. /skills/
+          echo "fetched $(ls /skills | wc -l) skills from $SKILLS_REF @ $(git rev-parse --short HEAD)"
+      volumeMounts:
+        - name: networkdoctor-skills
+          mountPath: /skills
+
+  additionalVolumes:
+    - name: networkdoctor-skills
+      emptyDir: {}
+  additionalVolumeMounts:
+    - name: networkdoctor-skills
+      mountPath: /etc/holmes/networkdoctor-skills
+      readOnly: true
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 2Gi

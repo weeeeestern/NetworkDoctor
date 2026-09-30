@@ -1,0 +1,29 @@
+# On-prem lab overrides for HolmesGPT.
+#
+# Helm replaces maps key by key, so only the fields that differ are listed.
+# LLM gateway VM: Proxmox VM 111, static 192.168.0.21 (deploy/llm-gateway/).
+
+holmes:
+  modelList:
+    gateway-sonnet:
+      model: openai/claude-sonnet
+      api_base: http://192.168.0.21:4000/v1
+      api_key: envRef:LLM_GATEWAY_KEY
+      temperature: 0
+    gateway-haiku:
+      model: openai/claude-haiku
+      api_base: http://192.168.0.21:4000/v1
+      api_key: envRef:LLM_GATEWAY_KEY
+      temperature: 0
+    gateway-luna:
+      model: openai/gpt-luna
+      api_base: http://192.168.0.21:4000/v1
+      api_key: envRef:LLM_GATEWAY_KEY
+
+  toolsets:
+    prometheus/metrics:
+      enabled: true
+      config:
+        # kube-prometheus-stack 84.5.0 in namespace monitoring
+        prometheus_url: http://prometheus-stack-kube-prom-prometheus.monitoring.svc:9090
+        timeout: 30

@@ -30,3 +30,10 @@ applications:
   # Cat Shop (podinfo) demo workload + fortio load
   - name: networkdoctor-demo
     namespace: networkdoctor-demo
+
+  # HolmesGPT RCA agent. Needs Secret holmes-llm (LLM_GATEWAY_KEY) in the
+  # namespace before the first sync; see deploy/helm/holmesgpt/README.md.
+  - name: holmesgpt
+    namespace: holmesgpt
+    valueFiles:
+      - values-onprem-lab.yaml

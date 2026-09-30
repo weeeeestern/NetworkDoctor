@@ -23,6 +23,7 @@ jobs:
           filters: |
             deploy:
               - 'deploy/**'
+              - 'skills/**'
               - '.github/workflows/deploy-ci.yml'
 
   helm:
@@ -47,6 +48,21 @@ jobs:
           helm template root deploy/bootstrap -f deploy/bootstrap/onprem-lab.yaml > /tmp/root.yaml
           [ "$(grep -c '^kind: Application' /tmp/root.yaml)" -ge 2 ]
           ! grep -q 'automated' /tmp/root.yaml
+
+      - name: helm lint + template (holmesgpt chart)
+        run: |
+          helm lint deploy/helm/holmesgpt -f deploy/helm/holmesgpt/values-onprem-lab.yaml
+          helm template h deploy/helm/holmesgpt -n holmesgpt -f deploy/helm/holmesgpt/values-onprem-lab.yaml > /tmp/holmes.yaml
+          grep -q 'CUSTOM_SKILL_PATHS' /tmp/holmes.yaml
+          grep -q 'name: holmes-llm' /tmp/holmes.yaml
+
+      - name: skills have the common output schema
+        run: |
+          for f in skills/*/SKILL.md; do
+            for k in rule_id scenario investigation_status affected_resources time_window root_cause confidence trigger_evidence supporting_evidence excluded_alternatives recommended_actions additional_checks; do
+              grep -q "^$k:" "$f" || { echo "$f missing $k"; exit 1; }
+            done
+          done
 
       - name: helm lint + template (demo chart)
         run: |

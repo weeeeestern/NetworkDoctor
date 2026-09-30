@@ -1,0 +1,10 @@
+apiVersion: v2
+name: holmesgpt
+description: HolmesGPT for NetworkDoctor RCA - official holmes chart as a dependency, wired to the on-prem LLM gateway, in-cluster Prometheus, and the NetworkDoctor scenario skills in this repo's skills/ directory.
+type: application
+version: 0.1.0
+appVersion: "0.38.1"
+dependencies:
+  - name: holmes
+    version: 0.38.1
+    repository: https://robusta-charts.storage.googleapis.com
