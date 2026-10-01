@@ -159,6 +159,7 @@ incident
 │  ├─ alertmanager/          # route/receiver examples
 │  └─ prometheus/rules/      # rule file notes
 ├─ docs/deploy-onprem.md     # on-prem MVP install / verification / rollback
+├─ scripts/repro/            # lab fault injection for Rule 1-8, with PASS/FAIL check
 ├─ prestudy/
 ├─ go.mod
 ├─ go.sum

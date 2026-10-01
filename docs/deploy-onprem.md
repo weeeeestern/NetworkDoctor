@@ -189,6 +189,10 @@ curl -s 'http://<alertmanager>/api/v2/alerts?filter=source%3D%22networkdoctor%22
 kubectl -n networkdoctor logs deploy/networkdoctor-backend | grep webhook
 ```
 
+To exercise Rule 1-8 end to end, including the Holmes investigation, run the
+fault scripts in [`scripts/repro/`](../scripts/repro/README.md) on a lab
+cluster, one at a time.
+
 ## 5. Rollback
 
 Everything is a single Helm release; nothing outside the namespace is
