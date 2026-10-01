@@ -43,7 +43,7 @@ backend:
     prometheusURL: http://prometheus-stack-kube-prom-prometheus.monitoring.svc:9090
     # HolmesGPT child app (deploy/helm/holmesgpt), Service holmesgpt-holmes:80.
     holmesURL: http://holmesgpt-holmes.holmesgpt.svc:80
-    holmesModel: gateway-sonnet
+    holmesModel: gateway-luna
     # Lab only: Rule 1-8 alerts do not exist yet, so smoke alerts are the only
     # way to exercise the chain. Put "smoke-" back once real rules land.
     holmesSkipRulePrefixes: ""
