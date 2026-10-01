@@ -29,6 +29,11 @@ func Markdown(inc *incident.Incident) string {
 	row(&b, "Services", strings.Join(inc.AffectedServices, ", "))
 	row(&b, "Summary", inc.SymptomSummary)
 	row(&b, "Investigation", holmesLine(inc))
+	if inc.IsGroupMember() {
+		row(&b, "Correlation", "grouped into "+inc.CorrelationID+" (see its report)")
+	} else if len(inc.CorrelatedIncidents) > 0 {
+		row(&b, "Correlation", "primary of "+strings.Join(inc.CorrelatedIncidents, ", "))
+	}
 	b.WriteString("\n")
 
 	r := inc.HolmesResult

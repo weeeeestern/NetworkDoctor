@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -39,6 +40,16 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	skip := investigate.ParseSkipPrefixes(cfg.HolmesSkipRulePrefixes)
+	eligible := func(i *incident.Incident) bool {
+		for _, p := range skip {
+			if strings.HasPrefix(i.RuleID, p) {
+				return false
+			}
+		}
+		return true
+	}
+
 	// Evidence + Holmes are optional: each is enabled by its URL.
 	var inv api.Investigator
 	if cfg.HolmesURL != "" || cfg.PrometheusURL != "" {
@@ -47,8 +58,9 @@ func main() {
 			Model:        cfg.HolmesModel,
 			Window:       cfg.EvidenceWindow,
 			Timeout:      cfg.HolmesTimeout,
-			SkipPrefixes: investigate.ParseSkipPrefixes(cfg.HolmesSkipRulePrefixes),
+			SkipPrefixes: skip,
 			Workers:      cfg.Workers,
+			GroupWait:    cfg.GroupWait,
 			Logger:       logger,
 		}
 		if cfg.PrometheusURL != "" {
@@ -63,12 +75,14 @@ func main() {
 	srv := &http.Server{
 		Addr: cfg.Listen,
 		Handler: api.New(api.Options{
-			Store:           store,
-			ClusterName:     cfg.ClusterName,
-			MaxBodyBytes:    cfg.MaxBodyBytes,
-			Logger:          logger,
-			Investigator:    inv,
-			AutoInvestigate: cfg.HolmesAuto,
+			Store:             store,
+			ClusterName:       cfg.ClusterName,
+			MaxBodyBytes:      cfg.MaxBodyBytes,
+			Logger:            logger,
+			Investigator:      inv,
+			AutoInvestigate:   cfg.HolmesAuto,
+			CorrelationWindow: cfg.CorrelationWindow,
+			Eligible:          eligible,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,

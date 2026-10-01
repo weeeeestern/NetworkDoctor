@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // ErrNotFound is returned when an incident ID is unknown.
@@ -87,6 +88,88 @@ func (s *FileStore) Update(id string, mutate func(inc *Incident) error) (*Incide
 		return nil, err
 	}
 	return inc, nil
+}
+
+// Correlate assigns a correlation group to incident id, under the store lock
+// so concurrent webhooks cannot create two primaries for one group.
+//
+// An eligible incident joins the earliest eligible primary with the same
+// CorrelationKey whose StartsAt is within window of its own; otherwise it
+// becomes a primary itself. Ineligible incidents (e.g. smoke rules) are
+// always their own primary and never become a group's primary, so a smoke
+// alert cannot swallow a real scenario incident.
+func (s *FileStore) Correlate(id string, window time.Duration, eligible func(*Incident) bool) (*Incident, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	inc, err := s.readLocked(id)
+	if err != nil {
+		return nil, err
+	}
+	if inc.CorrelationID != "" {
+		return inc, nil
+	}
+	key := inc.CorrelationKey()
+	if key == "" || window <= 0 || (eligible != nil && !eligible(inc)) {
+		inc.CorrelationID = inc.IncidentID
+		return inc, s.writeLocked(inc)
+	}
+
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return nil, fmt.Errorf("list data dir: %w", err)
+	}
+	var primary *Incident
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, "inc-") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		c, err := s.readLocked(strings.TrimSuffix(name, ".json"))
+		if err != nil || c.IncidentID == inc.IncidentID || c.IsGroupMember() || c.CorrelationID == "" {
+			continue
+		}
+		if eligible != nil && !eligible(c) {
+			continue
+		}
+		if c.CorrelationKey() != key {
+			continue
+		}
+		d := inc.StartsAt.Sub(c.StartsAt)
+		if d < -window || d > window {
+			continue
+		}
+		if primary == nil || c.StartsAt.Before(primary.StartsAt) {
+			primary = c
+		}
+	}
+
+	if primary == nil {
+		inc.CorrelationID = inc.IncidentID
+		return inc, s.writeLocked(inc)
+	}
+	inc.CorrelationID = primary.IncidentID
+	primary.CorrelatedIncidents = append(primary.CorrelatedIncidents, inc.IncidentID)
+	if err := s.writeLocked(primary); err != nil {
+		return nil, err
+	}
+	return inc, s.writeLocked(inc)
+}
+
+// Members returns the incidents whose CorrelationID is primaryID, excluding
+// the primary itself.
+func (s *FileStore) Members(primaryID string) ([]*Incident, error) {
+	all, err := s.List()
+	if err != nil {
+		return nil, err
+	}
+	var out []*Incident
+	for _, i := range all {
+		if i.CorrelationID == primaryID && i.IncidentID != primaryID {
+			out = append(out, i)
+		}
+	}
+	return out, nil
 }
 
 // Save writes an incident unconditionally.

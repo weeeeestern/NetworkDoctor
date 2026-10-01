@@ -38,6 +38,11 @@ type Options struct {
 	Investigator Investigator
 	// AutoInvestigate enqueues new firing incidents automatically.
 	AutoInvestigate bool
+	// CorrelationWindow groups new incidents with an existing one on the same
+	// node/service started within this window (0 disables grouping).
+	CorrelationWindow time.Duration
+	// Eligible decides which incidents take part in grouping (nil = all).
+	Eligible func(*incident.Incident) bool
 }
 
 type handler struct {
@@ -48,6 +53,8 @@ type handler struct {
 	log          *log.Logger
 	inv          Investigator
 	auto         bool
+	window       time.Duration
+	eligible     func(*incident.Incident) bool
 }
 
 // New returns the HTTP handler for the backend.
@@ -60,6 +67,8 @@ func New(opts Options) http.Handler {
 		log:          opts.Logger,
 		inv:          opts.Investigator,
 		auto:         opts.AutoInvestigate,
+		window:       opts.CorrelationWindow,
+		eligible:     opts.Eligible,
 	}
 	if h.now == nil {
 		h.now = time.Now
@@ -149,6 +158,13 @@ func (h *handler) alertmanagerWebhook(w http.ResponseWriter, r *http.Request) {
 			resp.Updated++
 		}
 		resp.Incidents = append(resp.Incidents, inc.IncidentID)
+		if created && !a.IsResolved() {
+			if c, err := h.store.Correlate(inc.IncidentID, h.window, h.eligible); err != nil {
+				h.log.Printf("webhook: correlate %s: %v", inc.IncidentID, err)
+			} else if c.IsGroupMember() {
+				h.log.Printf("webhook: incident %s joins correlation group %s", inc.IncidentID, c.CorrelationID)
+			}
+		}
 		if created && !a.IsResolved() && h.auto && h.inv != nil {
 			if err := h.inv.Enqueue(inc.IncidentID, false); err != nil {
 				h.log.Printf("webhook: enqueue investigation %s: %v", inc.IncidentID, err)
@@ -173,6 +189,8 @@ type IncidentSummary struct {
 	EndsAt         *time.Time `json:"ends_at"`
 	AffectedNodes  []string   `json:"affected_nodes"`
 	DeliveryCount  int        `json:"delivery_count"`
+	HolmesStatus   string     `json:"holmes_status,omitempty"`
+	CorrelationID  string     `json:"correlation_id,omitempty"`
 }
 
 func (h *handler) listIncidents(w http.ResponseWriter, r *http.Request) {
@@ -200,6 +218,8 @@ func (h *handler) listIncidents(w http.ResponseWriter, r *http.Request) {
 			EndsAt:         inc.EndsAt,
 			AffectedNodes:  inc.AffectedNodes,
 			DeliveryCount:  inc.DeliveryCount,
+			HolmesStatus:   inc.HolmesStatus,
+			CorrelationID:  inc.CorrelationID,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"incidents": out, "count": len(out)})

@@ -45,6 +45,11 @@ type Config struct {
 	HolmesSkipRulePrefixes string
 	// Workers is the number of concurrent investigations.
 	Workers int
+	// CorrelationWindow groups incidents on the same node/service that start
+	// within this window; 0 disables grouping.
+	CorrelationWindow time.Duration
+	// GroupWait delays a group's investigation so co-firing alerts join first.
+	GroupWait time.Duration
 }
 
 // ParseFlags parses CLI flags. Environment variables ND_LISTEN, ND_DATA_DIR,
@@ -66,6 +71,8 @@ func ParseFlags() Config {
 	flag.BoolVar(&cfg.HolmesAuto, "holmes-auto", envOr("ND_HOLMES_AUTO", "true") == "true", "investigate new firing incidents automatically")
 	flag.StringVar(&cfg.HolmesSkipRulePrefixes, "holmes-skip-rule-prefixes", envOrEmpty("ND_HOLMES_SKIP_RULE_PREFIXES", "smoke-"), "comma-separated rule_id prefixes excluded from automatic investigation")
 	flag.IntVar(&cfg.Workers, "workers", int(envInt64Or("ND_WORKERS", 1)), "concurrent investigations")
+	flag.DurationVar(&cfg.CorrelationWindow, "correlation-window", envDurationOr("ND_CORRELATION_WINDOW", 10*time.Minute), "group incidents on the same node/service within this window (0 disables)")
+	flag.DurationVar(&cfg.GroupWait, "group-wait", envDurationOr("ND_GROUP_WAIT", 90*time.Second), "wait before investigating a group so co-firing alerts join")
 	flag.Parse()
 	return cfg
 }

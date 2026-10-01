@@ -223,3 +223,103 @@ func TestUnparseableAnswerIsKeptAndMarkedFailed(t *testing.T) {
 		t.Fatalf("analysis=%q error=%q", got.HolmesAnalysis, got.HolmesError)
 	}
 }
+
+func newIncidentAt(t *testing.T, store *incident.FileStore, ruleID, node string, startsAt time.Time) *incident.Incident {
+	t.Helper()
+	a := alertmanager.Alert{
+		Status:      "firing",
+		Fingerprint: "fp-" + ruleID + "-" + node,
+		StartsAt:    startsAt,
+		Labels:      map[string]string{"alertname": "A-" + ruleID, "rule_id": ruleID, "node": node},
+	}
+	inc, _, err := store.Upsert(a.SourceKey(), func(*incident.Incident) (*incident.Incident, error) {
+		return incident.FromAlert(a, incident.Meta{Cluster: "lab"}, time.Now()), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return inc
+}
+
+func TestCorrelateGroupsSameNodeWithinWindow(t *testing.T) {
+	store, _ := incident.NewFileStore(t.TempDir())
+	t0 := time.Date(2026, 10, 1, 4, 24, 9, 0, time.UTC)
+	notSmoke := func(i *incident.Incident) bool { return !strings.HasPrefix(i.RuleID, "smoke-") }
+
+	smoke := newIncidentAt(t, store, "smoke-2", "worker01", t0.Add(-time.Minute))
+	r3 := newIncidentAt(t, store, "rule-3", "worker01", t0)
+	r5 := newIncidentAt(t, store, "rule-5", "worker01", t0.Add(30*time.Second))
+	other := newIncidentAt(t, store, "rule-6", "worker02", t0.Add(time.Minute))
+	late := newIncidentAt(t, store, "rule-8", "worker01", t0.Add(20*time.Minute))
+
+	for _, i := range []*incident.Incident{smoke, r3, r5, other, late} {
+		if _, err := store.Correlate(i.IncidentID, 10*time.Minute, notSmoke); err != nil {
+			t.Fatal(err)
+		}
+	}
+	get := func(i *incident.Incident) *incident.Incident { g, _ := store.Get(i.IncidentID); return g }
+
+	if g := get(smoke); g.IsGroupMember() || g.CorrelationID != smoke.IncidentID {
+		t.Errorf("smoke incident must stay alone: %+v", g.CorrelationID)
+	}
+	if g := get(r3); g.IsGroupMember() || len(g.CorrelatedIncidents) != 1 || g.CorrelatedIncidents[0] != r5.IncidentID {
+		t.Errorf("rule-3 should be primary of rule-5: %+v", g.CorrelatedIncidents)
+	}
+	if g := get(r5); g.CorrelationID != r3.IncidentID {
+		t.Errorf("rule-5 should join rule-3, got %s", g.CorrelationID)
+	}
+	if g := get(other); g.IsGroupMember() {
+		t.Errorf("different node must not join")
+	}
+	if g := get(late); g.IsGroupMember() {
+		t.Errorf("incident outside the window must not join")
+	}
+}
+
+func TestGroupIsInvestigatedOnceWithRelatedAlerts(t *testing.T) {
+	var calls atomic.Int32
+	var lastAsk atomic.Value
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		var req map[string]string
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &req)
+		lastAsk.Store(req["ask"])
+		json.NewEncoder(w).Encode(map[string]any{"analysis": holmesAnswer, "tool_calls": []any{1}})
+	}))
+	defer hs.Close()
+
+	store, _ := incident.NewFileStore(t.TempDir())
+	t0 := time.Date(2026, 10, 1, 4, 24, 9, 0, time.UTC)
+	primary := newIncidentAt(t, store, "rule-3", "worker01", t0)
+	member := newIncidentAt(t, store, "rule-5", "worker01", t0)
+	_, _ = store.Correlate(primary.IncidentID, 10*time.Minute, nil)
+	_, _ = store.Correlate(member.IncidentID, 10*time.Minute, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := investigate.New(ctx, investigate.Options{
+		Store: store, Holmes: holmes.New(hs.URL, "", time.Second), GroupWait: 50 * time.Millisecond, Workers: 2,
+	})
+	_ = r.Enqueue(primary.IncidentID, false)
+	_ = r.Enqueue(member.IncidentID, false)
+
+	waitStatus(t, store, primary.IncidentID, "done")
+	m := waitStatus(t, store, member.IncidentID, "grouped")
+	time.Sleep(100 * time.Millisecond)
+	if calls.Load() != 1 {
+		t.Fatalf("holmes called %d times for one group, want 1", calls.Load())
+	}
+	if !strings.Contains(m.HolmesError, primary.IncidentID) {
+		t.Errorf("member should point at its primary: %q", m.HolmesError)
+	}
+	ask, _ := lastAsk.Load().(string)
+	if !strings.Contains(ask, member.IncidentID) || !strings.Contains(ask, "rule_id=rule-5") {
+		t.Errorf("primary ask must list the related alert")
+	}
+
+	md := report.Markdown(m)
+	if !strings.Contains(md, "grouped into "+primary.IncidentID) {
+		t.Errorf("member report should point at the primary")
+	}
+}

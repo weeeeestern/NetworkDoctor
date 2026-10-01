@@ -75,6 +75,30 @@ type Incident struct {
 	// DeliveryCount counts webhook deliveries that touched this incident.
 	// It is diagnostic only: it shows how often Alertmanager redelivered.
 	DeliveryCount int `json:"delivery_count"`
+
+	// CorrelationID is the incident_id of the group's primary incident (its
+	// own id for a primary). Incidents on the same node (or service) that
+	// start within the correlation window share one group and one Holmes
+	// investigation. CorrelatedIncidents is set on the primary only.
+	CorrelationID       string   `json:"correlation_id,omitempty"`
+	CorrelatedIncidents []string `json:"correlated_incidents,omitempty"`
+}
+
+// CorrelationKey is what two incidents must share to be grouped: the first
+// affected node, or the first affected service when there is no node.
+func (inc *Incident) CorrelationKey() string {
+	if len(inc.AffectedNodes) > 0 {
+		return "node:" + inc.AffectedNodes[0]
+	}
+	if len(inc.AffectedServices) > 0 {
+		return "svc:" + inc.AffectedServices[0]
+	}
+	return ""
+}
+
+// IsGroupMember reports whether the incident belongs to another primary.
+func (inc *Incident) IsGroupMember() bool {
+	return inc.CorrelationID != "" && inc.CorrelationID != inc.IncidentID
 }
 
 // RootCauseCandidate is one scored root-cause hypothesis.

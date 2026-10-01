@@ -21,6 +21,7 @@ import (
 type Store interface {
 	Get(id string) (*incident.Incident, error)
 	Update(id string, mutate func(*incident.Incident) error) (*incident.Incident, error)
+	Members(primaryID string) ([]*incident.Incident, error)
 }
 
 // Asker is the subset of holmes.Client the runner needs.
@@ -38,8 +39,11 @@ type Options struct {
 	Timeout      time.Duration
 	SkipPrefixes []string
 	Workers      int
-	Logger       *log.Logger
-	Now          func() time.Time
+	// GroupWait delays a primary's investigation so alerts that fire
+	// together can join its correlation group first.
+	GroupWait time.Duration
+	Logger    *log.Logger
+	Now       func() time.Time
 }
 
 type job struct {
@@ -115,6 +119,25 @@ func (r *Runner) loop(ctx context.Context) {
 var errSkip = errors.New("skip")
 
 func (r *Runner) run(ctx context.Context, j job) {
+	// Group members are investigated with their primary, not on their own.
+	if !j.force {
+		cur, err := r.o.Store.Get(j.id)
+		if err != nil {
+			r.o.Logger.Printf("investigate %s: %v", j.id, err)
+			return
+		}
+		if cur.IsGroupMember() {
+			r.markGrouped(cur.IncidentID, cur.CorrelationID)
+			return
+		}
+		if r.o.GroupWait > 0 && !r.skipped(cur.RuleID) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(r.o.GroupWait):
+			}
+		}
+	}
 	now := r.o.Now().UTC()
 
 	// Claim the incident: decide under the store lock whether to run.
@@ -142,6 +165,16 @@ func (r *Runner) run(ctx context.Context, j job) {
 	}
 	if inc.HolmesStatus != "running" {
 		return
+	}
+
+	var related []*incident.Incident
+	if !j.force || !inc.IsGroupMember() {
+		if ms, err := r.o.Store.Members(inc.IncidentID); err == nil {
+			related = ms
+			for _, m := range ms {
+				r.markGrouped(m.IncidentID, inc.IncidentID)
+			}
+		}
 	}
 
 	start := inc.StartsAt.Add(-r.o.Window)
@@ -176,7 +209,7 @@ func (r *Runner) run(ctx context.Context, j job) {
 	hctx, cancel := context.WithTimeout(ctx, r.o.Timeout)
 	defer cancel()
 	t0 := time.Now()
-	ask := holmes.BuildAsk(inc, start, end)
+	ask := holmes.BuildAsk(inc, related, start, end)
 	ans, err := r.o.Holmes.Ask(hctx, ask)
 	if err != nil {
 		r.finish(j.id, "failed", err.Error(), holmes.Answer{}, nil)
@@ -239,6 +272,23 @@ func applyResult(i *incident.Incident, r map[string]any) {
 				i.RecommendedActions = append(i.RecommendedActions, s)
 			}
 		}
+	}
+}
+
+// markGrouped records that an incident is covered by its primary's
+// investigation. A finished or running own investigation is left alone.
+func (r *Runner) markGrouped(id, primary string) {
+	_, err := r.o.Store.Update(id, func(i *incident.Incident) error {
+		if i.HolmesStatus == "done" || i.HolmesStatus == "running" || i.HolmesStatus == "grouped" {
+			return incident.ErrNoChange
+		}
+		i.HolmesStatus = "grouped"
+		i.HolmesError = "investigated together with " + primary
+		i.UpdatedAt = r.o.Now().UTC()
+		return nil
+	})
+	if err != nil {
+		r.o.Logger.Printf("investigate %s: mark grouped: %v", id, err)
 	}
 }
 

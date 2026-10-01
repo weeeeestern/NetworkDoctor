@@ -79,7 +79,7 @@ func (c *Client) Ask(ctx context.Context, ask string) (Answer, error) {
 // BuildAsk renders the investigation request from an incident. No skill name
 // is given: routing is the skills' job (their descriptions start with the
 // rule_id/scenario label values).
-func BuildAsk(inc *incident.Incident, windowStart, windowEnd time.Time) string {
+func BuildAsk(inc *incident.Incident, related []*incident.Incident, windowStart, windowEnd time.Time) string {
 	var b strings.Builder
 	b.WriteString("A NetworkDoctor alert fired. Investigate the root cause with the matching NetworkDoctor skill, ")
 	b.WriteString("Prometheus and read-only Kubernetes tools.\n")
@@ -102,6 +102,15 @@ func BuildAsk(inc *incident.Incident, windowStart, windowEnd time.Time) string {
 		b.WriteString("annotations:\n")
 		for _, k := range sortedKeys(inc.AlertAnnotations) {
 			fmt.Fprintf(&b, "  %s: %q\n", k, inc.AlertAnnotations[k])
+		}
+	}
+	if len(related) > 0 {
+		b.WriteString("\nOther NetworkDoctor alerts started on the same node/service within the correlation window. ")
+		b.WriteString("Decide whether they share one root cause with the alert above; if so, explain the link in root_cause ")
+		b.WriteString("and list them under scenario_details.related_alerts, otherwise say they are separate:\n")
+		for _, m := range related {
+			fmt.Fprintf(&b, "- incident %s: alertname=%s rule_id=%s scenario=%s starts_at=%s summary=%q\n",
+				m.IncidentID, m.AlertLabels["alertname"], m.RuleID, m.Scenario, m.StartsAt.Format(time.RFC3339), m.SymptomSummary)
 		}
 	}
 	if len(inc.EvidenceMetrics) > 0 {
