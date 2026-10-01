@@ -1,6 +1,6 @@
 {{- if .Values.ruleConfigMap.enabled }}
 # Fallback for Prometheus installations without the PrometheusRule CRD.
-# Mount this ConfigMap into the Prometheus pod and reference the file from
+# Mount this ConfigMap into the Prometheus pod and list each key under
 # `rule_files:` in prometheus.yml (see docs/deploy-onprem.md).
 apiVersion: v1
 kind: ConfigMap
@@ -10,6 +10,8 @@ metadata:
   labels:
     {{- include "networkdoctor.labels" . | nindent 4 }}
 data:
-  networkdoctor-smoke-rules.yaml: |
-    {{- .Files.Get "rules/networkdoctor-smoke-rules.yaml" | nindent 4 }}
+  {{- range $path, $_ := .Files.Glob "rules/*.yaml" }}
+  {{ base $path }}: |
+    {{- $.Files.Get $path | nindent 4 }}
+  {{- end }}
 {{- end }}

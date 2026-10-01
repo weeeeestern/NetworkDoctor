@@ -1,5 +1,26 @@
 {{- if .Values.prometheusRule.enabled }}
-{{- $rules := .Files.Get "rules/networkdoctor-smoke-rules.yaml" | fromYaml }}
+{{- /*
+Every rules/*.yaml file becomes part of one PrometheusRule. Rules labelled
+source=networkdoctor get namespace=<release namespace>: the Prometheus
+Operator scopes our AlertmanagerConfig route to that namespace, so alerts
+about kube-system (CoreDNS) or app namespaces would otherwise never reach the
+backend. Those rules keep the original namespace in target_namespace.
+*/}}
+{{- $groups := list }}
+{{- range $path, $_ := .Files.Glob "rules/*.yaml" }}
+{{- $doc := $.Files.Get $path | fromYaml }}
+{{- range $g := $doc.groups }}
+{{- $rules := list }}
+{{- range $r := $g.rules }}
+{{- if and $r.labels (eq (toString $r.labels.source) "networkdoctor") }}
+{{- $_ := set $r.labels "namespace" $.Release.Namespace }}
+{{- end }}
+{{- $rules = append $rules $r }}
+{{- end }}
+{{- $_ := set $g "rules" $rules }}
+{{- $groups = append $groups $g }}
+{{- end }}
+{{- end }}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -12,7 +33,7 @@ metadata:
     {{- end }}
 spec:
   groups:
-    {{- toYaml $rules.groups | nindent 4 }}
+    {{- toYaml $groups | nindent 4 }}
     {{- with .Values.prometheusRule.additionalGroups }}
     {{- toYaml . | nindent 4 }}
     {{- end }}

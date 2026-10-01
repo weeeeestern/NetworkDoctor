@@ -44,9 +44,8 @@ backend:
     # HolmesGPT child app (deploy/helm/holmesgpt), Service holmesgpt-holmes:80.
     holmesURL: http://holmesgpt-holmes.holmesgpt.svc:80
     holmesModel: gateway-luna
-    # Lab only: Rule 1-8 alerts do not exist yet, so smoke alerts are the only
-    # way to exercise the chain. Put "smoke-" back once real rules land.
-    holmesSkipRulePrefixes: ""
+    # Rule 1-8 scenario rules exist (rules/networkdoctor-scenario-rules.yaml),
+    # so smoke alerts go back to pipeline-only: chart default "smoke-".
   persistence:
     # Lab storage comes from the local-path-provisioner child app (default
     # StorageClass `local-path`). storageClass is left empty on purpose so the

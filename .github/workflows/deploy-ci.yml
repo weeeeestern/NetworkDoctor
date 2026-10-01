@@ -84,6 +84,7 @@ jobs:
             > /tmp/fallback.yaml
           grep -q 'kind: ServiceMonitor' /tmp/operator.yaml
           grep -q 'kind: PrometheusRule' /tmp/operator.yaml
+          [ "$(grep -c 'rule_id: rule-' /tmp/operator.yaml)" -eq 8 ]
           grep -q 'kind: AlertmanagerConfig' /tmp/operator.yaml
           ! grep -q 'kind: AlertmanagerConfig' /tmp/default.yaml
           grep -q 'kind: ConfigMap' /tmp/fallback.yaml
@@ -93,7 +94,7 @@ jobs:
       - name: promtool check rules
         run: |
           docker run --rm -v "$PWD:/work" --entrypoint promtool prom/prometheus:v3.5.0 \
-            check rules /work/$CHART/rules/networkdoctor-smoke-rules.yaml
+            check rules /work/$CHART/rules/networkdoctor-smoke-rules.yaml /work/$CHART/rules/networkdoctor-scenario-rules.yaml
 
   deploy-ci-gate:
     needs: [changes, helm]

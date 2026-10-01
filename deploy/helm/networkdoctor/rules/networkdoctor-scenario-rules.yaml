@@ -1,0 +1,224 @@
+# NetworkDoctor scenario rules (Rule 1-8).
+#
+# Detection lives here; root-cause reasoning is the matching Holmes skill
+# (skills/<scenario>/SKILL.md), selected by the rule_id/scenario labels below.
+#
+# Only metrics verified on the lab cluster (2026-10-01) are used:
+#   ebpf_*                      NetworkDoctor agent      (label node)
+#   node_* (node-exporter)      kube-prometheus-stack    (instance=<ip>:9100, no node label)
+#   coredns_*                   CoreDNS ServiceMonitor   (rcode, namespace, service)
+#   hubble_*                    Cilium Hubble metrics    (instance=<ip>:9965, no node label)
+#   http_request_duration_seconds / http_requests_total   instrumented apps (namespace, service, node)
+# Not exported on the lab cluster, so not used: node_nf_conntrack_stat_*,
+# hubble_policy_verdict_total, coredns_forward_*.
+#
+# node-exporter and Hubble series get a `node` label by joining on
+# kube_node_info.internal_ip. The ports (9100, 9965) are the chart defaults;
+# adjust if a cluster exposes them elsewhere.
+#
+# Routing: the Helm template overwrites `namespace` on every rule labelled
+# source=networkdoctor with the release namespace, because the Operator scopes
+# the AlertmanagerConfig route to that namespace. Rules that are about another
+# namespace keep it in `target_namespace`.
+#
+# Thresholds are starting points for a small cluster; each is stated in the
+# annotation so an incident shows what fired.
+groups:
+  - name: networkdoctor.scenarios
+    rules:
+      # ---------------------------------------------------------------- Rule 1
+      - alert: NetworkDoctorNetworkCongestion
+        expr: |
+          (
+            histogram_quantile(0.99,
+              sum by (le, namespace, service, node) (rate(http_request_duration_seconds_bucket[5m])))
+            > 0.5
+          )
+          and on (node)
+          (
+            sum by (node) (rate(ebpf_tcp_retransmits_total[5m])) > 0.2
+          )
+        for: 3m
+        labels:
+          severity: warning
+          source: networkdoctor
+          rule_id: rule-1
+          scenario: network-congestion
+        annotations:
+          summary: "App p99 latency and TCP retransmits both up on {{ $labels.node }}"
+          description: "{{ $labels.service }} p99 latency {{ $value | humanizeDuration }} (> 500ms) while TCP retransmits on the same node exceed 0.2/s for 3m."
+
+      # ---------------------------------------------------------------- Rule 2
+      - alert: NetworkDoctorKernelNetworkBottleneck
+        expr: |
+          (
+            sum by (node) (
+              rate(node_softnet_dropped_total[5m])
+              * on (instance) group_left (node)
+                max by (instance, node) (label_replace(kube_node_info, "instance", "$1:9100", "internal_ip", "(.*)"))
+            ) > 1
+          )
+          or
+          (
+            sum by (node) (
+              rate(node_network_receive_drop_total{device!~"lo|veth.*|lxc.*|cilium.*|tailscale.*|docker.*"}[5m])
+              * on (instance) group_left (node)
+                max by (instance, node) (label_replace(kube_node_info, "instance", "$1:9100", "internal_ip", "(.*)"))
+            ) > 10
+          )
+        for: 5m
+        labels:
+          severity: warning
+          source: networkdoctor
+          rule_id: rule-2
+          scenario: kernel-network-bottleneck
+        annotations:
+          summary: "Softnet or NIC receive drops on {{ $labels.node }}"
+          description: "softnet drops > 1/s or physical NIC rx drops > 10/s on {{ $labels.node }} for 5m (value {{ $value | printf \"%.2f\" }}/s)."
+
+      # ---------------------------------------------------------------- Rule 3
+      - alert: NetworkDoctorConntrackExhaustion
+        expr: |
+          (
+            (node_nf_conntrack_entries / node_nf_conntrack_entries_limit)
+            * on (instance) group_left (node)
+              max by (instance, node) (label_replace(kube_node_info, "instance", "$1:9100", "internal_ip", "(.*)"))
+          ) > 0.8
+          or
+          (
+            sum by (node) (
+              rate(hubble_drop_total{reason="CT_MAP_INSERTION_FAILED"}[5m])
+              * on (instance) group_left (node)
+                max by (instance, node) (label_replace(kube_node_info, "instance", "$1:9965", "internal_ip", "(.*)"))
+            ) > 0
+          )
+        for: 5m
+        labels:
+          severity: warning
+          source: networkdoctor
+          rule_id: rule-3
+          scenario: conntrack-exhaustion
+        annotations:
+          summary: "Conntrack table near full or insert failures on {{ $labels.node }}"
+          description: "conntrack entries/limit > 80% or Cilium CT_MAP_INSERTION_FAILED drops on {{ $labels.node }} for 5m (value {{ $value | printf \"%.3f\" }})."
+
+      # ---------------------------------------------------------------- Rule 4
+      # NXDOMAIN is deliberately excluded: Kubernetes search domains make it
+      # routine (2026-10-01 lab: every DNS "error" was rcode 3).
+      - alert: NetworkDoctorCoreDNSDegradation
+        expr: |
+          label_replace(
+            (
+              histogram_quantile(0.99,
+                sum by (le, namespace, service) (rate(coredns_dns_request_duration_seconds_bucket[5m])))
+              > 0.25
+            )
+            or
+            (
+              sum by (namespace, service) (rate(coredns_dns_responses_total{rcode="SERVFAIL"}[5m]))
+              / clamp_min(sum by (namespace, service) (rate(coredns_dns_responses_total[5m])), 0.001)
+              > 0.05
+            ),
+            "target_namespace", "$1", "namespace", "(.*)")
+        for: 5m
+        labels:
+          severity: warning
+          source: networkdoctor
+          rule_id: rule-4
+          scenario: coredns-degradation
+        annotations:
+          summary: "CoreDNS slow or returning SERVFAIL"
+          description: "CoreDNS p99 > 250ms or SERVFAIL ratio > 5% for 5m (value {{ $value | printf \"%.3f\" }}). NXDOMAIN is not counted."
+
+      # ---------------------------------------------------------------- Rule 5
+      - alert: NetworkDoctorDNSConntrackCorrelation
+        expr: |
+          (
+            sum by (node) (rate(ebpf_dns_slow_total[5m])) > 0.1
+          )
+          and on (node)
+          (
+            (node_nf_conntrack_entries / node_nf_conntrack_entries_limit)
+            * on (instance) group_left (node)
+              max by (instance, node) (label_replace(kube_node_info, "instance", "$1:9100", "internal_ip", "(.*)"))
+            > 0.5
+          )
+        for: 5m
+        labels:
+          severity: warning
+          source: networkdoctor
+          rule_id: rule-5
+          scenario: dns-conntrack-correlation
+        annotations:
+          summary: "Slow DNS together with conntrack pressure on {{ $labels.node }}"
+          description: "Slow DNS responses > 0.1/s and conntrack usage > 50% on the same node for 5m."
+
+      # ---------------------------------------------------------------- Rule 6
+      # Fires only when exactly one node is unhealthy; a cluster-wide problem
+      # is not node-localized.
+      - alert: NetworkDoctorNodeLocalizedFailure
+        expr: |
+          (
+            sum by (node) (rate(ebpf_tcp_connect_failed_total[5m]))
+            / clamp_min(sum by (node) (rate(ebpf_tcp_connect_attempts_total[5m])), 0.001)
+            > 0.1
+          )
+          and on ()
+          (
+            count(
+              sum by (node) (rate(ebpf_tcp_connect_failed_total[5m]))
+              / clamp_min(sum by (node) (rate(ebpf_tcp_connect_attempts_total[5m])), 0.001)
+              > 0.1
+            ) == 1
+          )
+        for: 2m
+        labels:
+          severity: warning
+          source: networkdoctor
+          rule_id: rule-6
+          scenario: node-localized-failure
+        annotations:
+          summary: "TCP connect failures concentrated on {{ $labels.node }}"
+          description: "{{ $value | humanizePercentage }} of TCP connects fail on {{ $labels.node }} while every other node stays below 10%, for 2m."
+
+      # ---------------------------------------------------------------- Rule 7
+      - alert: NetworkDoctorApplicationInducedBottleneck
+        expr: |
+          label_replace(
+            (
+              sum by (namespace, service) (rate(http_requests_total{status=~"5.."}[5m]))
+              / clamp_min(sum by (namespace, service) (rate(http_requests_total[5m])), 0.001)
+              > 0.05
+            )
+            unless on ()
+            (
+              max(sum by (node) (rate(ebpf_tcp_retransmits_total[5m]))) > 0.2
+            ),
+            "target_namespace", "$1", "namespace", "(.*)")
+        for: 3m
+        labels:
+          severity: warning
+          source: networkdoctor
+          rule_id: rule-7
+          scenario: application-induced-network-bottleneck
+        annotations:
+          summary: "{{ $labels.target_namespace }}/{{ $labels.service }} 5xx while the network is quiet"
+          description: "5xx ratio {{ $value | humanizePercentage }} (> 5%) for 3m with no node above 0.2 TCP retransmits/s."
+
+      # ---------------------------------------------------------------- Rule 8
+      - alert: NetworkDoctorNetworkPolicyDenied
+        expr: |
+          sum by (node) (
+            rate(hubble_drop_total{reason=~"POLICY_DENIED|POLICY_DENY"}[5m])
+            * on (instance) group_left (node)
+              max by (instance, node) (label_replace(kube_node_info, "instance", "$1:9965", "internal_ip", "(.*)"))
+          ) > 0
+        for: 2m
+        labels:
+          severity: warning
+          source: networkdoctor
+          rule_id: rule-8
+          scenario: networkpolicy-misconfiguration
+        annotations:
+          summary: "Cilium dropping traffic by policy on {{ $labels.node }}"
+          description: "Hubble reports POLICY_DENIED drops on {{ $labels.node }} for 2m ({{ $value | printf \"%.2f\" }}/s)."

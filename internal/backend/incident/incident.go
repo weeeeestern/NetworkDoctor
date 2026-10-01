@@ -192,7 +192,10 @@ func (inc *Incident) applyClassification(a alertmanager.Alert) {
 		// fall back to the scrape target host.
 		inc.AffectedNodes = uniqueNonEmpty(hostOf(l["instance"]))
 	}
-	inc.AffectedServices = uniqueNonEmpty(qualified(l["namespace"], l["service"]), qualified(l["namespace"], l["workload"]))
+	// Scenario rules rewrite `namespace` to the NetworkDoctor namespace for
+	// routing and keep the namespace they are about in `target_namespace`.
+	ns := firstNonEmpty(l["target_namespace"], l["namespace"])
+	inc.AffectedServices = uniqueNonEmpty(qualified(ns, l["service"]), qualified(ns, l["workload"]))
 }
 
 func hostOf(instance string) string {
