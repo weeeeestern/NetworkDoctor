@@ -28,6 +28,8 @@ on:
 jobs:
   image:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # bump-lab-image.sh pushes the pinned tag to main
     steps:
       - uses: actions/checkout@v4
 
@@ -66,3 +68,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Pin the lab to the image just pushed (main only).
+      - name: Pin lab values to main-<sha>
+        if: github.ref == 'refs/heads/main'
+        run: .github/scripts/bump-lab-image.sh backend-image "main-${GITHUB_SHA::7}"

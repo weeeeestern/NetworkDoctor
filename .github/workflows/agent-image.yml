@@ -17,10 +17,28 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+    # Only agent sources. Without this filter every push (docs, charts) rebuilt
+    # an identical agent image, and with CI-pinned tags that would roll the
+    # eBPF DaemonSet on every node for no reason.
+    paths:
+      - "bpf/**"
+      - "cmd/networkdoctor-agent/**"
+      - "internal/app/**"
+      - "internal/bpf/**"
+      - "internal/config/**"
+      - "internal/metrics/**"
+      - "internal/model/**"
+      - "internal/worker/**"
+      - "build/agent/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/agent-image.yml"
 
 jobs:
   image:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # bump-lab-image.sh pushes the pinned tag to main
     steps:
       - uses: actions/checkout@v4
 
@@ -58,3 +76,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Pin the lab to the image just pushed (main only, not release tags).
+      - name: Pin lab values to main-<sha>
+        if: github.ref == 'refs/heads/main'
+        run: .github/scripts/bump-lab-image.sh agent-image "main-${GITHUB_SHA::7}"

@@ -220,6 +220,13 @@ backend:
     # prove the pipeline and have no matching skill.
     holmesSkipRulePrefixes: "smoke-"
     workers: "1"
+    # Incidents on the same node (or service when there is no node) that
+    # start within this window form one group and get one investigation.
+    # "0s" disables grouping.
+    correlationWindow: 10m
+    # A group's primary waits this long before Holmes starts, so alerts that
+    # fire together (e.g. Rule 3 and Rule 5) join first.
+    groupWait: 90s
     # Evidence and investigation window: startsAt +/- this.
     evidenceWindow: 15m
     maxBodyBytes: "4194304"

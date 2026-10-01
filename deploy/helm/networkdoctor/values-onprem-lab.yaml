@@ -10,6 +10,11 @@ agent:
   # and fail on "find interface eno1". Drop the tolerations so the taint keeps it
   # on the workers only.
   iface: eno1
+  image:
+    # Pinned per commit. CI (agent-image.yml) rewrites this line after it
+    # pushes a new image; do not edit the marker comment.
+    tag: main-4c3abc8  # ci: agent-image
+    pullPolicy: IfNotPresent
   hostNetwork: true
   privileged: true
   tolerations: []
@@ -36,9 +41,10 @@ backend:
   # merge (backend-image.yml on main push, 2026-09-28).
   enabled: true
   image:
-    # The lab tracks the moving `edge` tag; Always makes each rollout pull the
-    # latest main build instead of a node-cached one.
-    pullPolicy: Always
+    # Pinned per commit. CI (backend-image.yml) rewrites this line after it
+    # pushes a new image, so Argo CD only goes OutOfSync once the image exists.
+    tag: main-4c3abc8  # ci: backend-image
+    pullPolicy: IfNotPresent
   config:
     prometheusURL: http://prometheus-stack-kube-prom-prometheus.monitoring.svc:9090
     # HolmesGPT child app (deploy/helm/holmesgpt), Service holmesgpt-holmes:80.

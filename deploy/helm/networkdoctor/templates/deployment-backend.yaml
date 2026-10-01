@@ -75,6 +75,10 @@ spec:
               value: {{ .Values.backend.config.holmesSkipRulePrefixes | quote }}
             - name: ND_WORKERS
               value: {{ .Values.backend.config.workers | quote }}
+            - name: ND_CORRELATION_WINDOW
+              value: {{ .Values.backend.config.correlationWindow | quote }}
+            - name: ND_GROUP_WAIT
+              value: {{ .Values.backend.config.groupWait | quote }}
             - name: ND_EVIDENCE_WINDOW
               value: {{ .Values.backend.config.evidenceWindow | quote }}
             - name: ND_MAX_BODY_BYTES
