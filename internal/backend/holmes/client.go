@@ -85,7 +85,9 @@ func BuildAsk(inc *incident.Incident, windowStart, windowEnd time.Time) string {
 	b.WriteString("Prometheus and read-only Kubernetes tools.\n")
 	b.WriteString("Reply with a short summary, then exactly one fenced ```yaml block that follows the skill's Output Schema ")
 	b.WriteString("(rule_id, scenario, investigation_status, confidence, time_window, affected_resources, root_cause, ")
-	b.WriteString("trigger_evidence, supporting_evidence, excluded_alternatives, recommended_actions, additional_checks).\n\n")
+	b.WriteString("trigger_evidence, supporting_evidence, excluded_alternatives, recommended_actions, additional_checks).\n")
+	b.WriteString("Do not reply with a plan or a status update: keep calling tools until the investigation is finished, ")
+	b.WriteString("and only then send one final reply that ends with the yaml block.\n\n")
 
 	fmt.Fprintf(&b, "incident_id: %s\n", inc.IncidentID)
 	fmt.Fprintf(&b, "cluster: %s\n", inc.Cluster)
@@ -109,6 +111,13 @@ func BuildAsk(inc *incident.Incident, windowStart, windowEnd time.Time) string {
 		}
 	}
 	return b.String()
+}
+
+// RetryAsk is sent when the first answer had no parseable result (some
+// models stop after announcing their plan).
+func RetryAsk(original, previous string) string {
+	return original + "\n\nYour previous reply ended before the investigation was done:\n---\n" +
+		truncate(previous, 1500) + "\n---\nContinue the investigation now with tools and finish with the yaml block."
 }
 
 var yamlBlock = regexp.MustCompile("(?s)```ya?ml\\s*\\n(.*?)```")

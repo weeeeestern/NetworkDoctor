@@ -176,13 +176,25 @@ func (r *Runner) run(ctx context.Context, j job) {
 	hctx, cancel := context.WithTimeout(ctx, r.o.Timeout)
 	defer cancel()
 	t0 := time.Now()
-	ans, err := r.o.Holmes.Ask(hctx, holmes.BuildAsk(inc, start, end))
+	ask := holmes.BuildAsk(inc, start, end)
+	ans, err := r.o.Holmes.Ask(hctx, ask)
 	if err != nil {
 		r.finish(j.id, "failed", err.Error(), holmes.Answer{}, nil)
 		r.o.Logger.Printf("investigate %s: holmes failed after %s: %v", j.id, time.Since(t0).Round(time.Second), err)
 		return
 	}
 	result, perr := holmes.ParseResult(ans.Analysis)
+	if perr != nil {
+		// One automatic follow-up: some models end the turn after stating a
+		// plan. Same incident, same claim, so this does not break once-per-incident.
+		r.o.Logger.Printf("investigate %s: answer not parseable (%v, %d tool calls); asking once more", j.id, perr, ans.ToolCalls)
+		ans2, err2 := r.o.Holmes.Ask(hctx, holmes.RetryAsk(ask, ans.Analysis))
+		if err2 == nil {
+			ans2.ToolCalls += ans.ToolCalls
+			ans = ans2
+			result, perr = holmes.ParseResult(ans.Analysis)
+		}
+	}
 	status, msg := "done", ""
 	if perr != nil {
 		status, msg = "failed", "answer received but not parseable: "+perr.Error()

@@ -178,6 +178,35 @@ func TestRunnerSkipsExcludedRulePrefixes(t *testing.T) {
 	}
 }
 
+func TestPlanOnlyAnswerIsRetriedOnce(t *testing.T) {
+	var calls atomic.Int32
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		var req map[string]string
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &req)
+		if n == 1 {
+			json.NewEncoder(w).Encode(map[string]any{"analysis": "I found the network-congestion skill and will use it.", "tool_calls": []any{1, 2}})
+			return
+		}
+		if !strings.Contains(req["ask"], "previous reply ended before the investigation was done") {
+			t.Errorf("retry ask should quote the previous reply")
+		}
+		json.NewEncoder(w).Encode(map[string]any{"analysis": holmesAnswer, "tool_calls": []any{1, 2, 3, 4}})
+	}))
+	defer hs.Close()
+	store, _ := incident.NewFileStore(t.TempDir())
+	inc := newIncident(t, store, "rule-1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := investigate.New(ctx, investigate.Options{Store: store, Holmes: holmes.New(hs.URL, "", time.Second)})
+	_ = r.Enqueue(inc.IncidentID, false)
+	got := waitStatus(t, store, inc.IncidentID, "done", "failed")
+	if got.HolmesStatus != "done" || calls.Load() != 2 || got.HolmesToolCalls != 6 || got.HolmesAttempts != 1 {
+		t.Fatalf("status=%s calls=%d toolcalls=%d attempts=%d", got.HolmesStatus, calls.Load(), got.HolmesToolCalls, got.HolmesAttempts)
+	}
+}
+
 func TestUnparseableAnswerIsKeptAndMarkedFailed(t *testing.T) {
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"analysis": "I could not find anything."})
