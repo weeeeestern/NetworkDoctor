@@ -48,5 +48,8 @@ backend:
     # way to exercise the chain. Put "smoke-" back once real rules land.
     holmesSkipRulePrefixes: ""
   persistence:
-    # No StorageClass on this cluster (kubectl get storageclass -> none).
-    enabled: false
+    # Lab storage comes from the local-path-provisioner child app (default
+    # StorageClass `local-path`). storageClass is left empty on purpose so the
+    # chart follows whatever default class a cluster has.
+    enabled: true
+    size: 1Gi

@@ -21,6 +21,26 @@ source:
 syncPolicy: {}
 
 applications:
+  # Lab-only storage. The on-prem lab has no StorageClass, so PVCs stay
+  # Pending. This installs Rancher local-path-provisioner (Apache-2.0) straight
+  # from its upstream Git chart and makes `local-path` the default class.
+  # Customer clusters bring their own storage; the NetworkDoctor chart never
+  # installs a provisioner (it only creates a PVC).
+  - name: local-path-provisioner
+    namespace: local-path-storage
+    repoURL: https://github.com/rancher/local-path-provisioner.git
+    targetRevision: v0.0.37
+    path: deploy/chart/local-path-provisioner
+    values:
+      storageClass:
+        defaultClass: true
+        name: local-path
+        reclaimPolicy: Delete
+      nodePathMap:
+        - node: DEFAULT_PATH_FOR_NON_LISTED_NODES
+          paths:
+            - /opt/local-path-provisioner
+
   # eBPF agent DaemonSet + backend + Prometheus/Alertmanager wiring
   - name: networkdoctor
     namespace: networkdoctor

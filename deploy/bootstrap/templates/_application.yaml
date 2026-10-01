@@ -7,6 +7,9 @@ Per-app fields (only `name` is required):
   namespace    destination namespace    (default: <name>)
   releaseName  Helm release name        (default: <name>)
   valueFiles   list of values files     (default: none -> chart values.yaml only)
+  values       inline Helm values (map) passed as helm.valuesObject
+  repoURL      chart from another Git repo (default: .Values.source.repoURL)
+  targetRevision  revision for repoURL     (default: .Values.source.targetRevision)
   ignoreDifferences  passed through verbatim
 */}}
 {{- define "application" -}}
@@ -29,13 +32,17 @@ spec:
     server: {{ $root.Values.spec.destination.server }}
     namespace: {{ $application.namespace | default $application.name }}
   source:
-    repoURL: {{ $root.Values.source.repoURL }}
-    targetRevision: {{ $root.Values.source.targetRevision | default "main" }}
+    repoURL: {{ $application.repoURL | default $root.Values.source.repoURL }}
+    targetRevision: {{ $application.targetRevision | default ($root.Values.source.targetRevision | default "main") }}
     path: {{ $application.path | default (printf "deploy/helm/%s" $application.name) }}
     helm:
       releaseName: {{ $application.releaseName | default $application.name }}
       {{- with $application.valueFiles }}
       valueFiles:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $application.values }}
+      valuesObject:
         {{- toYaml . | nindent 8 }}
       {{- end }}
   {{- with $application.ignoreDifferences }}
