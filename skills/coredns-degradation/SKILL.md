@@ -92,8 +92,10 @@ sum by (pod) (rate(coredns_dns_requests_total[1m]))
 sum by (pod) (rate(coredns_cache_misses_total[1m]))
 ```
 
-   - **One pod much slower than its peer** (for example 2x or more) at a similar request and cache-miss rate: the cause is local to that pod. Look at its node and its network path (the pod's host-side veth, node NIC, CPU on that node), not at upstream. An upstream problem slows every pod that forwards to it by about the same amount.
-   - **All pods slower by a similar amount**: upstream or shared cause, continue with step 5.
+   - **Required before any classification:** read each pod's p99 at the peak and compute `ratio = slowest pod p99 / fastest pod p99`. Put both values and the ratio in `supporting_evidence`, for example `coredns-aaaa 0.90s vs coredns-bbbb 0.30s, ratio 3.0`. "Both pods rose" is not a finding; only the ratio decides.
+   - **One pod much slower than its peer** (ratio 2 or more) at a similar request and cache-miss rate: the cause is local to that pod. Look at its node and its network path (the pod's host-side veth, node NIC, CPU on that node), not at upstream. An upstream problem slows every pod that forwards to it by about the same amount.
+   - **All pods slower by a similar amount** (ratio below 1.5): upstream or shared cause, continue with step 5.
+   - Ratio between 1.5 and 2: say so and keep both explanations open.
    - A rise on every pod together with a jump in cache misses is expected for uncached names: each miss costs one upstream round trip (often 100-300 ms). That baseline is not by itself an upstream fault; judge the pods against each other.
    - `coredns_forward_*` metrics are not exported on this cluster, so upstream latency cannot be measured directly. Do not conclude "slow upstream" without either forwarder errors in logs or all pods slowing together.
 
@@ -134,7 +136,7 @@ Classify upstream DNS issue when:
 - CoreDNS receives queries and returns `SERVFAIL`/timeouts, or every CoreDNS pod slows by a similar amount at the same time.
 - CoreDNS logs show upstream forwarder errors.
 - CoreDNS pod resources and in-cluster service endpoints are otherwise healthy.
-- Never classify as upstream when only one pod is slow.
+- Never classify as upstream when the per-pod p99 ratio is 2 or more, even if every pod's latency rose above its idle level.
 
 Exclude CoreDNS primary cause when:
 
