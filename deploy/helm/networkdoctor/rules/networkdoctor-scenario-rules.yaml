@@ -48,6 +48,49 @@ groups:
           summary: "App p99 latency and TCP retransmits both up on {{ $labels.node }}"
           description: "{{ $labels.service }} p99 latency {{ $value | humanizeDuration }} (> 500ms) while TCP retransmits on the same node exceed 0.2/s for 3m."
 
+      # ------------------------------------------------- Rule 1 (cross-node)
+      # Rule 1 needs latency and retransmits on the SAME node. That misses
+      # client-side loss: retransmits count on the sending (client) node while
+      # latency carries the app pod's node. This lower-confidence variant fires
+      # when a service is slow and some OTHER node retransmits, and the
+      # same-node rule is not already firing for that service. One alert per
+      # service; retransmit_node names the node with the most retransmits.
+      - alert: NetworkDoctorNetworkCongestionCrossNode
+        expr: |
+          label_replace(
+            (
+              max by (namespace, service) (
+                histogram_quantile(0.99,
+                  sum by (le, namespace, service, node) (rate(http_request_duration_seconds_bucket[5m])))
+              ) > 0.5
+              unless on (namespace, service)
+              (
+                histogram_quantile(0.99,
+                  sum by (le, namespace, service, node) (rate(http_request_duration_seconds_bucket[5m])))
+                > 0.5
+                and on (node)
+                sum by (node) (rate(ebpf_tcp_retransmits_total[5m])) > 0.2
+              )
+            )
+            + on () group_left (retransmit_node)
+            (
+              0 * max by (retransmit_node) (
+                label_replace(
+                  topk(1, sum by (node) (rate(ebpf_tcp_retransmits_total[5m])) > 0.2),
+                  "retransmit_node", "$1", "node", "(.*)"))
+            ),
+            "target_namespace", "$1", "namespace", "(.*)")
+        for: 5m
+        labels:
+          severity: info
+          source: networkdoctor
+          rule_id: rule-1
+          scenario: network-congestion
+          variant: cross-node
+        annotations:
+          summary: "{{ $labels.target_namespace }}/{{ $labels.service }} slow while {{ $labels.retransmit_node }} retransmits (different nodes)"
+          description: "{{ $labels.service }} p99 latency {{ $value | humanizeDuration }} (> 500ms) on its own nodes, while TCP retransmits exceed 0.2/s on {{ $labels.retransmit_node }}, a different node, for 5m. Lower confidence than Rule 1: the two may be unrelated."
+
       # ---------------------------------------------------------------- Rule 2
       - alert: NetworkDoctorKernelNetworkBottleneck
         expr: |

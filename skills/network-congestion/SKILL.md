@@ -1,7 +1,7 @@
 ---
 name: network-congestion
 description: Use for NetworkDoctor alerts labeled rule_id=rule-1 or scenario=network-congestion. Investigate Network Doctor Rule 1 alerts for Kubernetes network congestion by correlating application p99 latency, TCP retransmits, TCP RTT, TCP cwnd, NIC traffic/drop, run queue latency, and Hubble flow evidence.
-last_updated: 2026-09-30
+last_updated: 2026-10-02
 ---
 
 ## Goal
@@ -56,6 +56,21 @@ The agent exports these names (checked in Prometheus on the on-prem lab, 2026-09
 - `hubble_*` and `cilium_*` series have **no `node` label**. They carry `instance` (the node IP and port) and `pod` (the Cilium agent pod). Map a node to its Cilium pod with Kubernetes first, then filter on `pod` or `instance`; filtering on `node` returns nothing.
 - There is no DNS timeout counter. `ebpf_dns_slow_total` counts responses slower than the agent threshold (default 50 ms) and is the closest proxy.
 - Convert µs histograms before comparing to seconds: `histogram_quantile(0.99, sum by (le, node) (rate(ebpf_runqlat_bucket[5m]))) / 1e6`.
+
+## Cross-node variant (`variant=cross-node`)
+
+Rule 1 has two alerts with the same `rule_id=rule-1`:
+
+- `NetworkDoctorNetworkCongestion` (severity warning): latency and TCP retransmits on the **same** node. Labels include `node`.
+- `NetworkDoctorNetworkCongestionCrossNode` (severity info, `variant=cross-node`): the service is slow on its own nodes while a **different** node, `retransmit_node`, retransmits. There is no `node` label; the alert is per service.
+
+For the cross-node variant, the first question is whether the two signals are connected at all:
+
+1. Find the service's pods and their nodes, then find which workloads on `retransmit_node` talk to that service. Use Hubble flows (`hubble_observe_between_namespaces`, `hubble_observe_flows_summary`) filtered on the service as destination and pods on `retransmit_node` as source.
+2. If clients on `retransmit_node` call the slow service and their retransmits rise when its latency rises, treat it as client-side network loss or congestion on that node and continue with the workflow below, scoped to `retransmit_node`.
+3. If no traffic links `retransmit_node` to the service, or the timings do not line up, set `investigation_status: excluded` for congestion. Name the latency cause separately (application, CPU, dependency) and the retransmit cause separately.
+
+Default confidence for a confirmed cross-node finding is `medium`, never `high`, because the alert itself does not prove the link.
 
 ## Workflow
 
