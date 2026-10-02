@@ -1,7 +1,7 @@
 ---
 name: coredns-degradation
 description: Use for NetworkDoctor alerts labeled rule_id=rule-4 or scenario=coredns-degradation. Investigate Network Doctor Rule 4 alerts for CoreDNS latency, SERVFAIL/NXDOMAIN spikes, DNS timeout patterns, CoreDNS pod saturation, upstream DNS trouble, or Kubernetes DNS service degradation.
-last_updated: 2026-09-30
+last_updated: 2026-10-02
 ---
 
 ## Goal
@@ -84,6 +84,19 @@ sum by (pod, rcode) (
 )
 ```
 
+   Use the peer CoreDNS pod as the control. The DNS Service spreads queries evenly, so pods with similar request and cache-miss rates should show similar latency. Compare them over `[1m]` windows:
+
+```promql
+histogram_quantile(0.99, sum by (le, pod) (rate(coredns_dns_request_duration_seconds_bucket[1m])))
+sum by (pod) (rate(coredns_dns_requests_total[1m]))
+sum by (pod) (rate(coredns_cache_misses_total[1m]))
+```
+
+   - **One pod much slower than its peer** (for example 2x or more) at a similar request and cache-miss rate: the cause is local to that pod. Look at its node and its network path (the pod's host-side veth, node NIC, CPU on that node), not at upstream. An upstream problem slows every pod that forwards to it by about the same amount.
+   - **All pods slower by a similar amount**: upstream or shared cause, continue with step 5.
+   - A rise on every pod together with a jump in cache misses is expected for uncached names: each miss costs one upstream round trip (often 100-300 ms). That baseline is not by itself an upstream fault; judge the pods against each other.
+   - `coredns_forward_*` metrics are not exported on this cluster, so upstream latency cannot be measured directly. Do not conclude "slow upstream" without either forwarder errors in logs or all pods slowing together.
+
 3. Check CoreDNS pod health and saturation.
    - Query CPU, memory, restarts, pod readiness, and recent events for CoreDNS pods.
    - Fetch scoped CoreDNS logs near `alert_time` for `SERVFAIL`, `timeout`, `plugin/errors`, `forward`, `read udp`, and `no such host`.
@@ -111,11 +124,17 @@ Confirm CoreDNS degradation when:
 - Multiple clients or nodes are affected, or a CoreDNS pod shows saturation/restarts/log errors.
 - Hubble DNS observations show delayed or failed DNS responses involving CoreDNS.
 
+Classify a single CoreDNS pod path issue when:
+
+- One CoreDNS pod's p99 is much higher than its peers while request and cache-miss rates are similar.
+- That pod's resources look normal. The cause is then on its node or network path (veth, NIC, qdisc, CPU on that node). Name the pod and its node.
+
 Classify upstream DNS issue when:
 
-- CoreDNS receives queries and returns `SERVFAIL`/timeouts.
+- CoreDNS receives queries and returns `SERVFAIL`/timeouts, or every CoreDNS pod slows by a similar amount at the same time.
 - CoreDNS logs show upstream forwarder errors.
 - CoreDNS pod resources and in-cluster service endpoints are otherwise healthy.
+- Never classify as upstream when only one pod is slow.
 
 Exclude CoreDNS primary cause when:
 
