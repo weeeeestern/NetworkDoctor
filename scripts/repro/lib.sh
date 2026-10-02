@@ -247,7 +247,9 @@ for rule in rules:
         verdict = "PASS"
     else:
         verdict = "WARN"   # finished, but the answer names another scenario
-    print(f"  {rule:7s} {verdict:6s} {inc['incident_id']}  holmes={st}{via}  "
+    variant = inc.get("alert_labels", {}).get("variant")
+    tag = f" [{variant}]" if variant else ""
+    print(f"  {rule:7s} {verdict:6s} {inc['incident_id']}{tag}  holmes={st}{via}  "
           f"skill={picked} (expected {inc['scenario']})  "
           f"status={res.get('investigation_status', '-')} conf={res.get('confidence', '-')} "
           f"calls={owner.get('holmes_tool_calls', 0)}")

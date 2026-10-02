@@ -17,7 +17,7 @@ fault → eBPF agent / exporters → Prometheus rule → Alertmanager
 
 | Script | Rule · scenario | What it does | Fault time | Wait |
 | --- | --- | --- | --- | --- |
-| `rule1-congestion.sh` | 1 · network-congestion | Client pod with 30% egress loss calls Cat Shop `/delay/1` from 16 loops | 7 min | 16 min |
+| `rule1-congestion.sh` | 1 · network-congestion | Client pod with 30% egress loss calls Cat Shop `/delay/1` from 16 loops. `ND_RULE1_MODE=cross` runs the client on a node without Cat Shop to fire the cross-node variant | 7 min | 18 min |
 | `rule2-8-nic-drop-policy.sh` | 2 · kernel-network-bottleneck | Peer node sends 50 frames/s with an unused EtherType to the node's NIC, which counts them in `rx_dropped` | 9 min | 16 min |
 | | 8 · networkpolicy-misconfiguration | Deny-all ingress policy on a target pod while a client keeps sending it UDP | | |
 | `rule3-5-conntrack-dns.sh` | 3 · conntrack-exhaustion | Holds conntrack usage at 85% of a lowered `nf_conntrack_max` | 8 min | 18 min |
@@ -100,12 +100,13 @@ All are optional environment variables.
 | `ND_WAIT_MIN` | per script | Minutes to wait for investigations |
 | `ND_CONTEXT_DENY` | `prod` | Regex of kubectl contexts to refuse |
 
-Script-specific settings are `ND_LOSS` (Rule 1), `ND_CONNTRACK_PCT` (Rules 3 and 5), `ND_DNS_DELAY` (Rule 4) and `ND_CLOSED_PORT` (Rule 6).
+Script-specific settings are `ND_LOSS` and `ND_RULE1_MODE` (Rule 1), `ND_CONNTRACK_PCT` (Rules 3 and 5), `ND_DNS_DELAY` (Rule 4) and `ND_CLOSED_PORT` (Rule 6).
 
 ## Notes from the 2026-10 run
 
 - **Rule 3 is usually judged "excluded".** Holmes sees that `nf_conntrack_entries_limit` itself dropped, which is the correct reading of an artificial limit.
 - **Rule 4 needs the pod's own veth.** With Cilium legacy host routing, traffic reaches a pod through its `lxc*` device, not `cilium_host`. A netem on `cilium_host` has no effect. The script finds the device through `cilium-dbg endpoint list`.
 - **Rules 3 and 5 share a node, so they become one group.** The backend correlates them and calls Holmes once.
+- **Rule 1 has two alerts.** The main alert needs latency and retransmits on the same node, and latency carries the Cat Shop pod's node, so the script defaults to a Cat Shop node. The cross-node variant (severity info) covers client-side loss on another node; reproduce it with `ND_RULE1_MODE=cross`.
 - **Rule 8 uses UDP on purpose.** Denied TCP connects also count as connect failures and fire Rule 6 on the same node, which then groups with Rule 2.
 - **The fault ends after its fault time, even while the script still waits.** An investigation that starts inside the window sees the live fault. Anything left is restored when the script exits.
