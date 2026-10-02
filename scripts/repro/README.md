@@ -56,8 +56,10 @@ node get correlated into one group, which changes the result.
 
 Leave time between two runs of the same script. Its alerts stay firing for
 5-15 minutes after the fault ends, and a new fault would merge into them
-without creating a new incident. The scripts refuse to start while an
-expected rule is still firing.
+without creating a new incident. Even after they resolve, the previous run's
+metrics stay inside Holmes' 15-minute lookback and look like a signal that was
+"already elevated". The scripts refuse to start until the expected rules have
+been resolved for `ND_QUIET_MIN` minutes (default 15).
 
 Each script ends with a table, one line per expected rule:
 
@@ -99,6 +101,7 @@ All are optional environment variables.
 | `ND_DURATION` | per script | Fault duration in seconds |
 | `ND_WAIT_MIN` | per script | Minutes to wait for investigations |
 | `ND_CONTEXT_DENY` | `prod` | Regex of kubectl contexts to refuse |
+| `ND_QUIET_MIN` | `15` | Minutes an earlier incident of the same rule must be resolved |
 
 Script-specific settings are `ND_LOSS` and `ND_RULE1_MODE` (Rule 1), `ND_CONNTRACK_PCT` (Rules 3 and 5), `ND_DNS_DELAY` (Rule 4) and `ND_CLOSED_PORT` (Rule 6).
 

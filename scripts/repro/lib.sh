@@ -20,6 +20,7 @@
 #   ND_WAIT_MIN      max minutes to wait for investigations (per script)
 #   ND_PF_PORT       local port for the backend port-forward (18080)
 #   ND_CONTEXT_DENY  regex of kubectl contexts to refuse    (prod)
+#   ND_QUIET_MIN     minutes an earlier incident must be resolved (15)
 
 set -uo pipefail
 
@@ -31,6 +32,7 @@ ND_CATSHOP_URL=${ND_CATSHOP_URL:-http://catshop.${ND_DEMO_NS}.svc:9898}
 ND_TOOL_IMAGE=${ND_TOOL_IMAGE:-nicolaka/netshoot:v0.16}
 ND_PF_PORT=${ND_PF_PORT:-18080}
 ND_CONTEXT_DENY=${ND_CONTEXT_DENY:-prod}
+ND_QUIET_MIN=${ND_QUIET_MIN:-15}
 ND_LABEL_KEY=networkdoctor.io/repro
 ND_LOGDIR=$(mktemp -d "${TMPDIR:-/tmp}/nd-repro.XXXXXX")
 
@@ -187,20 +189,31 @@ nd_backend_connect() {
 }
 
 # nd_require_quiet "<rule ids>": stop if one of these rules still has a firing
-# incident. A new fault would merge into that alert and create no new
-# incident, so the run could not be judged. Wait for it to resolve first.
+# incident, or resolved less than ND_QUIET_MIN minutes ago. A firing alert
+# would absorb the new fault (no new incident); a recent one leaves its metric
+# tail inside Holmes' lookback window and skews the timing analysis.
 nd_require_quiet() {
   local busy
-  busy=$(curl -fsS "http://127.0.0.1:$ND_PF_PORT/incidents" | python3 -c "
-import json, sys
-rules = set(sys.argv[1].split())
-for i in json.load(sys.stdin)['incidents']:
-    if i['rule_id'] in rules and i.get('alert_status') == 'firing':
-        print(i['rule_id'], i['incident_id'], 'since', i['starts_at'])" "$1")
+  busy=$(curl -fsS "http://127.0.0.1:$ND_PF_PORT/incidents" \
+    | ND_RULES="$1" ND_QUIET_MIN="$ND_QUIET_MIN" python3 -c '
+import datetime, json, os, sys
+rules = set(os.environ["ND_RULES"].split())
+# Holmes looks back about 15 minutes; a fresh fault inside that window would
+# make the previous run look like a signal that was already elevated.
+cutoff = (datetime.datetime.now(datetime.timezone.utc)
+          - datetime.timedelta(minutes=int(os.environ["ND_QUIET_MIN"]))).strftime("%Y-%m-%dT%H:%M:%S")
+for i in json.load(sys.stdin)["incidents"]:
+    if i["rule_id"] not in rules:
+        continue
+    if i.get("alert_status") == "firing":
+        print(i["rule_id"], i["incident_id"], "still firing since", i["starts_at"])
+    elif (i.get("ends_at") or "") > cutoff:
+        print(i["rule_id"], i["incident_id"], "resolved only at", i["ends_at"])
+') || nd_die "could not check earlier incidents (backend unreachable?)"
   if [[ -n "$busy" ]]; then
-    nd_log "still firing from an earlier run:"
+    nd_log "an earlier run is too recent:"
     printf '  %s\n' "$busy" >&2
-    nd_die "wait until it resolves (usually 5-15 min after the fault ends), then rerun"
+    nd_die "wait until it has been resolved for ${ND_QUIET_MIN} minutes, then rerun"
   fi
 }
 
