@@ -64,13 +64,15 @@ Rule 1 has two alerts with the same `rule_id=rule-1`:
 - `NetworkDoctorNetworkCongestion` (severity warning): latency and TCP retransmits on the **same** node. Labels include `node`.
 - `NetworkDoctorNetworkCongestionCrossNode` (severity info, `variant=cross-node`): the service is slow on its own nodes while a **different** node, `retransmit_node`, retransmits. There is no `node` label; the alert is per service.
 
-For the cross-node variant, the first question is whether the two signals are connected at all:
+For the cross-node variant, the first question is whether the two signals are connected at all. Absence of flow data is not evidence that they are unrelated.
 
-1. Find the service's pods and their nodes, then find which workloads on `retransmit_node` talk to that service. Use Hubble flows (`hubble_observe_between_namespaces`, `hubble_observe_flows_summary`) filtered on the service as destination and pods on `retransmit_node` as source.
-2. If clients on `retransmit_node` call the slow service and their retransmits rise when its latency rises, treat it as client-side network loss or congestion on that node and continue with the workflow below, scoped to `retransmit_node`.
-3. If no traffic links `retransmit_node` to the service, or the timings do not line up, set `investigation_status: excluded` for congestion. Name the latency cause separately (application, CPU, dependency) and the retransmit cause separately.
-
-Default confidence for a confirmed cross-node finding is `medium`, never `high`, because the alert itself does not prove the link.
+1. **Flow data, if available.** If Hubble tools (`hubble_observe_*`) are configured, look for flows from pods on `retransmit_node` to the service. Hubble Prometheus metrics in this setup carry no source or destination labels, so they cannot attribute flows; do not rely on them for linkage.
+2. **Timing.** Compare when the retransmit rate on `retransmit_node` rose with when the service p99 rose (range queries, 30s step). Onsets within about 2 minutes of each other, and recovery at about the same time, support a link. Onsets more than 5 minutes apart, or retransmits that were already high long before the latency rose, argue against it.
+3. **Candidate clients.** With Kubernetes read tools, list pods running on `retransmit_node`. Pods in the service's namespace, pods whose spec, env or args reference the service name, and pods created shortly before the alert are candidate clients. Name them.
+4. **Decide.**
+   - Timing supports a link and a candidate client exists: treat it as client-side packet loss or congestion on `retransmit_node`, continue with the workflow below scoped to that node, `investigation_status: confirmed`, confidence `medium` at most.
+   - Evidence shows no link (timing contradicts it, or flow data shows no traffic from that node): `investigation_status: excluded` for congestion, and name the latency cause and the retransmit cause separately.
+   - The link can be neither shown nor ruled out: `investigation_status: inconclusive`, never `excluded`. Say exactly which data was missing.
 
 ## Workflow
 
