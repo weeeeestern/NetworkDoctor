@@ -43,7 +43,7 @@ backend:
   image:
     # Pinned per commit. CI (backend-image.yml) rewrites this line after it
     # pushes a new image, so Argo CD only goes OutOfSync once the image exists.
-    tag: main-8efc94c  # ci: backend-image
+    tag: main-a564f4e  # ci: backend-image
     pullPolicy: IfNotPresent
   config:
     prometheusURL: http://prometheus-stack-kube-prom-prometheus.monitoring.svc:9090
