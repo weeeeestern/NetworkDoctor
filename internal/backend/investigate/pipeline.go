@@ -70,10 +70,16 @@ type Outcome struct {
 
 // Investigate runs one investigation of inc with the given architecture and
 // returns the outcome without touching the store.
-func (r *Runner) Investigate(ctx context.Context, inc *incident.Incident, related []*incident.Incident, arch Arch) (out Outcome) {
+func (r *Runner) Investigate(ctx context.Context, inc *incident.Incident, related []*incident.Incident, arch Arch) Outcome {
+	return r.investigate(ctx, inc, related, arch, r.o.Holmes, r.o.Model)
+}
+
+// investigate is Investigate with an explicit Holmes client, so evaluation
+// runs can use their own model entry (and gateway key).
+func (r *Runner) investigate(ctx context.Context, inc *incident.Incident, related []*incident.Incident, arch Arch, h Asker, model string) (out Outcome) {
 	t0 := time.Now()
 	now := r.o.Now().UTC()
-	out = Outcome{Arch: arch, Model: r.o.Model, Status: "failed"}
+	out = Outcome{Arch: arch, Model: model, Status: "failed"}
 	out.WindowStart = inc.StartsAt.Add(-r.o.Window)
 	out.WindowEnd = inc.StartsAt.Add(r.o.Window)
 	if out.WindowEnd.After(now) {
@@ -95,7 +101,7 @@ func (r *Runner) Investigate(ctx context.Context, inc *incident.Incident, relate
 		cancel()
 	}
 
-	if r.o.Holmes == nil {
+	if h == nil {
 		out.Error = "holmes is not configured"
 		return out
 	}
@@ -107,7 +113,7 @@ func (r *Runner) Investigate(ctx context.Context, inc *incident.Incident, relate
 	ask := holmes.BuildAskWithFacts(&withEv, related, out.WindowStart, out.WindowEnd, out.Derived)
 
 	// 3. Holmes, with one follow-up when the answer has no parseable result.
-	ans, result, err := r.askParsed(hctx, ask, &out)
+	ans, result, err := r.askParsed(hctx, h, ask, &out)
 	if err != nil {
 		out.Error = err.Error()
 		return out
@@ -128,7 +134,7 @@ func (r *Runner) Investigate(ctx context.Context, inc *incident.Incident, relate
 				out.Checks = append(out.Checks, v)
 				if !v.Pass(CheckThreshold) {
 					out.Rechecked = true
-					ans2, res2, err2 := r.askParsed(hctx, ask+check.Feedback(in, v), &out)
+					ans2, res2, err2 := r.askParsed(hctx, h, ask+check.Feedback(in, v), &out)
 					if err2 == nil && res2 != nil {
 						out.Analysis, out.Result = ans2.Analysis, res2
 						if v2, e := r.o.Checker.Check(hctx, check.Input{Labels: inc.AlertLabels, Derived: out.Derived, Result: res2}); e == nil {
@@ -150,8 +156,8 @@ func (r *Runner) Investigate(ctx context.Context, inc *incident.Incident, relate
 
 // askParsed asks Holmes and, if the answer has no result block, asks once
 // more. Tool calls and Holmes calls accumulate on out.
-func (r *Runner) askParsed(ctx context.Context, ask string, out *Outcome) (holmes.Answer, map[string]any, error) {
-	ans, err := r.o.Holmes.Ask(ctx, ask)
+func (r *Runner) askParsed(ctx context.Context, h Asker, ask string, out *Outcome) (holmes.Answer, map[string]any, error) {
+	ans, err := h.Ask(ctx, ask)
 	out.HolmesCalls++
 	if err != nil {
 		return holmes.Answer{}, nil, err
@@ -160,7 +166,7 @@ func (r *Runner) askParsed(ctx context.Context, ask string, out *Outcome) (holme
 	result, perr := holmes.ParseResult(ans.Analysis)
 	if perr != nil {
 		r.o.Logger.Printf("answer not parseable (%v, %d tool calls); asking once more", perr, ans.ToolCalls)
-		ans2, err2 := r.o.Holmes.Ask(ctx, holmes.RetryAsk(ask, ans.Analysis))
+		ans2, err2 := h.Ask(ctx, holmes.RetryAsk(ask, ans.Analysis))
 		out.HolmesCalls++
 		if err2 == nil {
 			out.ToolCalls += ans2.ToolCalls
@@ -222,7 +228,11 @@ func (r *Runner) StartEval(incidentID, archName string) (string, error) {
 		defer func() { <-r.evalSem }()
 		run.Status = "running"
 		_ = r.saveEval(run)
-		o := r.Investigate(r.ctx, inc, related, arch)
+		h, model := r.o.Holmes, r.o.Model
+		if r.o.EvalHolmes != nil {
+			h, model = r.o.EvalHolmes, r.o.EvalModel
+		}
+		o := r.investigate(r.ctx, inc, related, arch, h, model)
 		run.Outcome, run.Status = &o, o.Status
 		if err := r.saveEval(run); err != nil {
 			r.o.Logger.Printf("eval %s: save: %v", run.RunID, err)

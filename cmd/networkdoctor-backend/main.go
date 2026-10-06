@@ -84,6 +84,10 @@ func main() {
 		}
 		if cfg.HolmesURL != "" {
 			opts.Holmes = holmes.New(cfg.HolmesURL, cfg.HolmesModel, cfg.HolmesTimeout)
+			if cfg.EvalHolmesModel != "" {
+				opts.EvalHolmes = holmes.New(cfg.HolmesURL, cfg.EvalHolmesModel, cfg.HolmesTimeout)
+				opts.EvalModel = cfg.EvalHolmesModel
+			}
 		}
 		inv = investigate.New(ctx, opts)
 	}
@@ -107,8 +111,8 @@ func main() {
 
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Printf("listening on %s (data-dir=%s eval-dir=%s cluster=%s prometheus=%q holmes=%q model=%q arch=%s jev=%t auto=%t skip=%q)",
-			cfg.Listen, cfg.DataDir, cfg.EvalDir, cfg.ClusterName, cfg.PrometheusURL, cfg.HolmesURL, cfg.HolmesModel, arch,
+		logger.Printf("listening on %s (data-dir=%s eval-dir=%s cluster=%s prometheus=%q holmes=%q model=%q eval-model=%q arch=%s jev=%t auto=%t skip=%q)",
+			cfg.Listen, cfg.DataDir, cfg.EvalDir, cfg.ClusterName, cfg.PrometheusURL, cfg.HolmesURL, cfg.HolmesModel, cfg.EvalHolmesModel, arch,
 			cfg.JevAPIKey != "", cfg.HolmesAuto, cfg.HolmesSkipRulePrefixes)
 		errCh <- srv.ListenAndServe()
 	}()

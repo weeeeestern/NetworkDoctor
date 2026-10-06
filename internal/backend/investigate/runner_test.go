@@ -397,3 +397,44 @@ func TestOutcomeRecordsDuration(t *testing.T) {
 		t.Fatalf("duration_ms=%d", o.DurationMS)
 	}
 }
+
+func TestEvalRunUsesEvalModelWhenSet(t *testing.T) {
+	models := make(chan string, 4)
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		models <- req["model"]
+		json.NewEncoder(w).Encode(map[string]any{"analysis": holmesAnswer})
+	}))
+	defer hs.Close()
+	store, _ := incident.NewFileStore(t.TempDir())
+	inc := newIncident(t, store, "rule-1")
+	r := investigate.New(context.Background(), investigate.Options{
+		Store: store, EvalDir: t.TempDir(),
+		Holmes: holmes.New(hs.URL, "gateway-luna", time.Second), Model: "gateway-luna",
+		EvalHolmes: holmes.New(hs.URL, "gateway-luna-eval", time.Second), EvalModel: "gateway-luna-eval",
+	})
+
+	if o := r.Investigate(context.Background(), inc, nil, investigate.ArchBaseline); o.Model != "gateway-luna" {
+		t.Fatalf("automatic outcome model=%q", o.Model)
+	}
+	id, err := r.StartEval(inc.IncidentID, "baseline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var run investigate.EvalRun
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		b, err := r.EvalResult(id)
+		if err == nil && json.Unmarshal(b, &run) == nil && (run.Status == "done" || run.Status == "failed") {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if run.Status != "done" || run.Outcome.Model != "gateway-luna-eval" {
+		t.Fatalf("run=%+v", run)
+	}
+	if a, b := <-models, <-models; a != "gateway-luna" || b != "gateway-luna-eval" {
+		t.Fatalf("holmes saw models %q then %q", a, b)
+	}
+}

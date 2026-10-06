@@ -213,6 +213,9 @@ backend:
     holmesURL: ""
     # Holmes modelList name; empty = Holmes default (its MODEL env).
     holmesModel: ""
+    # Holmes modelList name for POST /eval/runs; empty = holmesModel. Point it
+    # at an entry with its own gateway key to bill evaluations separately.
+    evalHolmesModel: ""
     holmesTimeout: 10m
     # Investigate new firing incidents automatically (once per incident).
     holmesAuto: "true"

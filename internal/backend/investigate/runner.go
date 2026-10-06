@@ -52,6 +52,10 @@ type Options struct {
 	Checker check.Checker
 	// EvalDir stores evaluation runs; "" disables POST /eval/runs.
 	EvalDir string
+	// EvalHolmes and EvalModel are used by evaluation runs instead of
+	// Holmes and Model; nil falls back to Holmes.
+	EvalHolmes Asker
+	EvalModel  string
 	// EvalWorkers bounds concurrent evaluation runs (default 1).
 	EvalWorkers int
 	Logger      *log.Logger

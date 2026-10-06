@@ -50,6 +50,9 @@ backend:
     # HolmesGPT child app (deploy/helm/holmesgpt), Service holmesgpt-holmes:80.
     holmesURL: http://holmesgpt-holmes.holmesgpt.svc:80
     holmesModel: gateway-luna
+    # Same model on the eval virtual key (holmesgpt-eval) so gateway spend
+    # splits into automatic vs evaluation.
+    evalHolmesModel: gateway-luna-eval
     # Rule 1-8 scenario rules exist (rules/networkdoctor-scenario-rules.yaml),
     # so smoke alerts go back to pipeline-only: chart default "smoke-".
     # Automatic investigations stay on the original pipeline; eval/run.py

@@ -67,6 +67,8 @@ spec:
               value: {{ .Values.backend.config.holmesURL | quote }}
             - name: ND_HOLMES_MODEL
               value: {{ .Values.backend.config.holmesModel | quote }}
+            - name: ND_EVAL_HOLMES_MODEL
+              value: {{ .Values.backend.config.evalHolmesModel | quote }}
             - name: ND_HOLMES_TIMEOUT
               value: {{ .Values.backend.config.holmesTimeout | quote }}
             - name: ND_HOLMES_AUTO

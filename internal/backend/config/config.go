@@ -37,6 +37,10 @@ type Config struct {
 
 	// HolmesModel is the Holmes modelList name to request ("" = Holmes default).
 	HolmesModel string
+	// EvalHolmesModel is the Holmes modelList name for POST /eval/runs
+	// ("" = HolmesModel). A separate entry lets the gateway bill evaluation
+	// runs to their own virtual key.
+	EvalHolmesModel string
 	// HolmesTimeout bounds one investigation call.
 	HolmesTimeout time.Duration
 	// HolmesAuto starts an investigation automatically for new firing incidents.
@@ -79,6 +83,7 @@ func ParseFlags() Config {
 	flag.DurationVar(&cfg.EvidenceWindow, "evidence-window", envDurationOr("ND_EVIDENCE_WINDOW", 15*time.Minute), "PromQL evidence window around the alert")
 	flag.Int64Var(&cfg.MaxBodyBytes, "max-body-bytes", envInt64Or("ND_MAX_BODY_BYTES", 4<<20), "maximum webhook request body size in bytes")
 	flag.StringVar(&cfg.HolmesModel, "holmes-model", envOr("ND_HOLMES_MODEL", ""), "Holmes model name to request (empty = Holmes default)")
+	flag.StringVar(&cfg.EvalHolmesModel, "eval-holmes-model", envOr("ND_EVAL_HOLMES_MODEL", ""), "Holmes model name for evaluation runs (empty = holmes-model)")
 	flag.DurationVar(&cfg.HolmesTimeout, "holmes-timeout", envDurationOr("ND_HOLMES_TIMEOUT", 10*time.Minute), "timeout for one Holmes investigation")
 	flag.BoolVar(&cfg.HolmesAuto, "holmes-auto", envOr("ND_HOLMES_AUTO", "true") == "true", "investigate new firing incidents automatically")
 	flag.StringVar(&cfg.HolmesSkipRulePrefixes, "holmes-skip-rule-prefixes", envOrEmpty("ND_HOLMES_SKIP_RULE_PREFIXES", "smoke-"), "comma-separated rule_id prefixes excluded from automatic investigation")
