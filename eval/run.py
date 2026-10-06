@@ -125,14 +125,20 @@ def load_expectations():
 
 
 def expand(term, truth):
-    """'{key}' -> truth values (list), plain text -> [text]."""
+    """'{key}' -> truth values (list), plain text -> [text].
+
+    Node names also match their short form: repro scripts record the full
+    name (worker01-hp-elitedesk-...) while answers often say "worker01"."""
     m = re.fullmatch(r"\{(\w+)\}", term)
     if not m:
         return [term]
     v = truth.get(m.group(1))
     if v is None:
         return []
-    return v if isinstance(v, list) else [v]
+    vals = v if isinstance(v, list) else [v]
+    if m.group(1) == "node":
+        vals = vals + [x.split("-")[0] for x in vals if x.startswith("worker") and "-" in x]
+    return list(dict.fromkeys(vals))
 
 
 def mentions(text, term):
@@ -201,7 +207,7 @@ def run_cases(be, cases, archs, repeat, fh, mode, expectations):
                     jev_ok = False
                     continue
                 write(fh, {"mode": mode, "rep": rep, "case": c["id"], "incident_id": c["incident_id"],
-                           "expect": c["expect"], "hard": c.get("hard", ""), "arch": arch,
+                           "expect": c["expect"], "truth": c["truth"], "hard": c.get("hard", ""), "arch": arch,
                            "run_id": run.get("run_id"), "score": s,
                            "at": now().isoformat(timespec="seconds") + "Z"})
                 log(f"   -> {'CORRECT' if s['correct'] else 'wrong'} (routed={s['routed']} status={s['status']} "
@@ -352,6 +358,36 @@ def cmd_report(args):
     print("\n".join(out))
 
 
+def cmd_rescore(args):
+    """Re-score stored runs with the current expectations (fetches outcomes by run id)."""
+    exp = load_expectations()
+    cases = {}
+    if os.path.exists(args.cases):
+        with open(args.cases) as f:
+            cases = {c["id"]: c for c in json.load(f)["cases"]}
+    be = Backend(args.ns, args.svc, args.port + 2)
+    try:
+        rows = []
+        with open(args.file) as f:
+            rows = [json.loads(l) for l in f if l.strip()]
+        for r in rows:
+            truth = r.get("truth") or cases.get(r["case"], {}).get("truth")
+            if truth is None:
+                log(f"{r['case']}: no truth recorded, kept old score")
+                continue
+            run = be.get(f"/eval/runs/{r['run_id']}")
+            run["wall_s"] = r["score"].get("duration_s", 0)
+            old_ok = r["score"]["correct"]
+            r["truth"], r["score"] = truth, score(run, exp[r["expect"]], truth)
+            if old_ok != r["score"]["correct"]:
+                log(f"{r['case']} {r['arch']}: correct {old_ok} -> {r['score']['correct']}")
+        with open(args.file, "w") as f:
+            for r in rows:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    finally:
+        be.close()
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--ns", default=os.environ.get("ND_NS", "networkdoctor"))
@@ -375,6 +411,11 @@ def main():
     p.add_argument("--wait-min", type=int, default=16)
     p.add_argument("--out")
     p.set_defaults(fn=cmd_live)
+
+    p = sub.add_parser("rescore", help="re-score a result file with the current expectations")
+    p.add_argument("file")
+    p.add_argument("--cases", default=os.path.join(HERE, "cases.json"))
+    p.set_defaults(fn=cmd_rescore)
 
     p = sub.add_parser("report", help="score result files")
     p.add_argument("files", nargs="+")
