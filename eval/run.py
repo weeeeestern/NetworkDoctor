@@ -51,8 +51,12 @@ SCRIPT_RULES = {  # repro script -> (expected rule ids, ground-truth template pe
 }
 
 
+def now():
+    return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+
+
 def log(msg):
-    print(f"{dt.datetime.utcnow():%H:%M:%S} {msg}", file=sys.stderr, flush=True)
+    print(f"{now():%H:%M:%S} {msg}", file=sys.stderr, flush=True)
 
 
 # --------------------------------------------------------------- backend
@@ -96,7 +100,8 @@ class Backend:
     def investigate(self, incident_id, arch, timeout_s=1200):
         """Start an eval run and wait for it. Returns the stored run."""
         run_id = self.post("/eval/runs", {"incident_id": incident_id, "arch": arch})["run_id"]
-        end = time.time() + timeout_s
+        t0 = time.time()
+        end = t0 + timeout_s
         while time.time() < end:
             time.sleep(10)
             try:
@@ -104,6 +109,7 @@ class Backend:
             except Exception:
                 continue
             if run.get("status") in ("done", "failed"):
+                run["wall_s"] = round(time.time() - t0)  # harness-side, 10s poll granularity
                 return run
         return {"run_id": run_id, "status": "timeout", "incident_id": incident_id, "arch": arch}
 
@@ -157,7 +163,7 @@ def score(run, template, truth):
         "groups": groups,
         "tool_calls": o.get("tool_calls", 0),
         "holmes_calls": o.get("holmes_calls", 0),
-        "duration_s": round((o.get("duration_ms") or 0) / 1000, 1),
+        "duration_s": round((o.get("duration_ms") or 0) / 1000, 1) or run.get("wall_s", 0),
         "rechecked": bool(o.get("rechecked")),
         "check_error": o.get("check_error", ""),
         "jev_consistent": [c.get("consistent") for c in checks],
@@ -171,7 +177,7 @@ def score(run, template, truth):
 
 def out_path(args, mode):
     os.makedirs(os.path.join(HERE, "results"), exist_ok=True)
-    return args.out or os.path.join(HERE, "results", f"{mode}-{dt.datetime.utcnow():%Y%m%dT%H%M%SZ}.jsonl")
+    return args.out or os.path.join(HERE, "results", f"{mode}-{now():%Y%m%dT%H%M%SZ}.jsonl")
 
 
 def write(fh, rec):
@@ -197,7 +203,7 @@ def run_cases(be, cases, archs, repeat, fh, mode, expectations):
                 write(fh, {"mode": mode, "rep": rep, "case": c["id"], "incident_id": c["incident_id"],
                            "expect": c["expect"], "hard": c.get("hard", ""), "arch": arch,
                            "run_id": run.get("run_id"), "score": s,
-                           "at": dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"})
+                           "at": now().isoformat(timespec="seconds") + "Z"})
                 log(f"   -> {'CORRECT' if s['correct'] else 'wrong'} (routed={s['routed']} status={s['status']} "
                     f"cause={s['cause_ok']}) {s['duration_s']}s, {s['tool_calls']} tool calls")
 
@@ -248,7 +254,7 @@ def cmd_live(args):
     open(hold_file, "w").close()
     env = dict(os.environ, ND_TRUTH_FILE=truth_file, ND_HOLD_FILE=hold_file,
                ND_DURATION=str(args.fault_min * 60), ND_WAIT_MIN=str(args.wait_min))
-    since = dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    since = now().strftime("%Y-%m-%dT%H:%M:%S")
     log(f"starting {os.path.basename(script)} (fault held up to {args.fault_min} min); log {tmp}/script.log")
     proc = subprocess.Popen(["bash", script], env=env, stdout=open(os.path.join(tmp, "script.log"), "w"),
                             stderr=subprocess.STDOUT, start_new_session=True)

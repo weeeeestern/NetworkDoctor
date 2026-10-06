@@ -70,15 +70,16 @@ type Outcome struct {
 
 // Investigate runs one investigation of inc with the given architecture and
 // returns the outcome without touching the store.
-func (r *Runner) Investigate(ctx context.Context, inc *incident.Incident, related []*incident.Incident, arch Arch) Outcome {
+func (r *Runner) Investigate(ctx context.Context, inc *incident.Incident, related []*incident.Incident, arch Arch) (out Outcome) {
 	t0 := time.Now()
 	now := r.o.Now().UTC()
-	out := Outcome{Arch: arch, Model: r.o.Model, Status: "failed"}
+	out = Outcome{Arch: arch, Model: r.o.Model, Status: "failed"}
 	out.WindowStart = inc.StartsAt.Add(-r.o.Window)
 	out.WindowEnd = inc.StartsAt.Add(r.o.Window)
 	if out.WindowEnd.After(now) {
 		out.WindowEnd = now
 	}
+	// Named result: the deferred assignment must reach the returned value.
 	defer func() { out.DurationMS = time.Since(t0).Milliseconds() }()
 
 	// 1. Evidence snapshot (all architectures).

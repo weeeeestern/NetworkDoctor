@@ -383,3 +383,17 @@ func TestEvalRunDerivedJevRechecksOnceAndLeavesIncidentAlone(t *testing.T) {
 		t.Fatal("want error for unknown arch")
 	}
 }
+
+func TestOutcomeRecordsDuration(t *testing.T) {
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(20 * time.Millisecond)
+		json.NewEncoder(w).Encode(map[string]any{"analysis": holmesAnswer})
+	}))
+	defer hs.Close()
+	store, _ := incident.NewFileStore(t.TempDir())
+	inc := newIncident(t, store, "rule-1")
+	r := investigate.New(context.Background(), investigate.Options{Store: store, Holmes: holmes.New(hs.URL, "", time.Second)})
+	if o := r.Investigate(context.Background(), inc, nil, investigate.ArchBaseline); o.DurationMS < 20 {
+		t.Fatalf("duration_ms=%d", o.DurationMS)
+	}
+}
