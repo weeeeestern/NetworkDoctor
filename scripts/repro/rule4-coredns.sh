@@ -44,6 +44,10 @@ nd_log "node=$NODE coredns=$COREDNS_IP dev=$DEV delay=$DELAY dns=$DNS_IP duratio
 nd_x nd-r4-node "tc qdisc replace dev $DEV root netem delay $DELAY"
 nd_on_exit "nd_x nd-r4-node 'tc qdisc del dev $DEV root'"
 
+COREDNS_POD=$(kubectl -n kube-system get pod -l k8s-app=kube-dns \
+  --field-selector "spec.nodeName=$NODE" -o jsonpath='{.items[0].metadata.name}')
+nd_truth rule-4 node "$NODE"
+nd_truth rule-4 pod "$COREDNS_POD"
 nd_pod nd-r4-client "$NODE" pod
 SINCE=$(nd_now)
 nd_fault_window "$DURATION"

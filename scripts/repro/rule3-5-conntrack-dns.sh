@@ -29,6 +29,7 @@ ORIG_MAX=$(nd_x nd-r35-node 'cat /proc/sys/net/netfilter/nf_conntrack_max')
 nd_on_exit "nd_x nd-r35-node 'sysctl -qw net.netfilter.nf_conntrack_max=$ORIG_MAX'"
 nd_log "node=$NODE conntrack_max=$ORIG_MAX target=${FILL_PCT}% duration=${DURATION}s"
 
+nd_truth rule-3 node "$NODE"
 SINCE=$(nd_now)
 nd_fault_window "$DURATION"
 # Rule 3 + Rule 5 conntrack side. The loop restores the limit itself when it

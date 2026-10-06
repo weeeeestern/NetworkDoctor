@@ -102,6 +102,8 @@ All are optional environment variables.
 | `ND_WAIT_MIN` | per script | Minutes to wait for investigations |
 | `ND_CONTEXT_DENY` | `prod` | Regex of kubectl contexts to refuse |
 | `ND_QUIET_MIN` | `15` | Minutes an earlier incident of the same rule must be resolved |
+| `ND_TRUTH_FILE` | unset | Write what was broken (node, pod, policy) for `eval/run.py` |
+| `ND_HOLD_FILE` | unset | Keep the fault after the wait while this file exists (used by `eval/run.py live`) |
 
 Script-specific settings are `ND_LOSS` and `ND_RULE1_MODE` (Rule 1), `ND_CONNTRACK_PCT` (Rules 3 and 5), `ND_DNS_DELAY` (Rule 4) and `ND_CLOSED_PORT` (Rule 6).
 

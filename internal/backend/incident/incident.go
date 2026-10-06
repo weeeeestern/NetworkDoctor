@@ -69,6 +69,13 @@ type Incident struct {
 	// HolmesToolCalls is how many tool calls Holmes made; a cheap signal of
 	// how hard it had to look.
 	HolmesToolCalls int `json:"holmes_tool_calls,omitempty"`
+	// HolmesArch is the investigation architecture used: baseline, derived
+	// or derived+jev (see internal/backend/investigate).
+	HolmesArch string `json:"holmes_arch,omitempty"`
+	// DerivedFacts are deterministic scenario facts (derived architectures).
+	DerivedFacts []Evidence `json:"derived_facts,omitempty"`
+	// HolmesCheck records the conclusion checker's verdicts (derived+jev).
+	HolmesCheck map[string]any `json:"holmes_check,omitempty"`
 
 	RecoveryStatus string `json:"recovery_status"`
 

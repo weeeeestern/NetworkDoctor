@@ -37,6 +37,10 @@ nd_pod nd-r1-client "$NODE" pod
 nd_x nd-r1-client "tc qdisc replace dev eth0 root netem loss $LOSS"
 nd_on_exit "nd_x nd-r1-client 'tc qdisc del dev eth0 root'"
 
+if [[ "$MODE" == cross ]]; then T=rule-1-cross; else T=rule-1; fi
+nd_truth "$T" node "$NODE"
+nd_truth "$T" client nd-r1-client
+nd_truth "$T" service catshop
 SINCE=$(nd_now)
 nd_fault_window "$DURATION"
 nd_bg nd-r1-client "$DURATION" "

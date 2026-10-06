@@ -83,6 +83,20 @@ spec:
               value: {{ .Values.backend.config.evidenceWindow | quote }}
             - name: ND_MAX_BODY_BYTES
               value: {{ .Values.backend.config.maxBodyBytes | quote }}
+            - name: ND_ARCH
+              value: {{ .Values.backend.config.arch | default "baseline" | quote }}
+            {{- with .Values.backend.jev }}
+            {{- if .enabled }}
+            - name: ND_JEV_MODEL
+              value: {{ .model | default "jev-latest" | quote }}
+            - name: JEV_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName | quote }}
+                  key: {{ .secretKey | default "JEV_API_KEY" | quote }}
+                  optional: true
+            {{- end }}
+            {{- end }}
             {{- with .Values.backend.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

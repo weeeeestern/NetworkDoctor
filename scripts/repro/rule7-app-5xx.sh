@@ -18,6 +18,7 @@ NODE=$(nd_node)
 nd_log "client node=$NODE target=$ND_CATSHOP_URL/status/500 duration=${DURATION}s"
 
 nd_pod nd-r7-client "$NODE" pod
+nd_truth rule-7 service catshop
 SINCE=$(nd_now)
 nd_fault_window "$DURATION"
 nd_bg nd-r7-client "$DURATION" "

@@ -12,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"networkdoctor-agent/internal/backend/check"
 	"networkdoctor-agent/internal/backend/evidence"
+	"networkdoctor-agent/internal/backend/features"
 	"networkdoctor-agent/internal/backend/holmes"
 	"networkdoctor-agent/internal/backend/incident"
 )
@@ -42,8 +44,18 @@ type Options struct {
 	// GroupWait delays a primary's investigation so alerts that fire
 	// together can join its correlation group first.
 	GroupWait time.Duration
-	Logger    *log.Logger
-	Now       func() time.Time
+	// Arch is the architecture for automatic investigations (default baseline).
+	Arch Arch
+	// Deriver computes derived facts (derived architectures); nil disables.
+	Deriver *features.Deriver
+	// Checker judges conclusions (derived+jev); nil disables the check.
+	Checker check.Checker
+	// EvalDir stores evaluation runs; "" disables POST /eval/runs.
+	EvalDir string
+	// EvalWorkers bounds concurrent evaluation runs (default 1).
+	EvalWorkers int
+	Logger      *log.Logger
+	Now         func() time.Time
 }
 
 type job struct {
@@ -53,8 +65,10 @@ type job struct {
 
 // Runner is a small bounded work queue.
 type Runner struct {
-	o     Options
-	queue chan job
+	o       Options
+	queue   chan job
+	ctx     context.Context
+	evalSem chan struct{}
 }
 
 // New starts the workers. They stop when ctx is cancelled.
@@ -74,7 +88,13 @@ func New(ctx context.Context, o Options) *Runner {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	r := &Runner{o: o, queue: make(chan job, 64)}
+	if o.Arch == "" {
+		o.Arch = ArchBaseline
+	}
+	if o.EvalWorkers <= 0 {
+		o.EvalWorkers = 1
+	}
+	r := &Runner{o: o, queue: make(chan job, 64), ctx: ctx, evalSem: make(chan struct{}, o.EvalWorkers)}
 	for i := 0; i < o.Workers; i++ {
 		go r.loop(ctx)
 	}
@@ -177,63 +197,35 @@ func (r *Runner) run(ctx context.Context, j job) {
 		}
 	}
 
-	start := inc.StartsAt.Add(-r.o.Window)
-	end := inc.StartsAt.Add(r.o.Window)
-	if end.After(now) {
-		end = now
-	}
-
-	// 1. Evidence snapshot.
-	if r.o.Evidence != nil {
-		ectx, cancel := context.WithTimeout(ctx, 60*time.Second)
-		node := firstOr(inc.AffectedNodes, "")
-		ev := r.o.Evidence.Collect(ectx, node, start, end)
-		cancel()
-		inc, err = r.o.Store.Update(j.id, func(i *incident.Incident) error {
-			i.EvidenceMetrics = ev
-			i.UpdatedAt = r.o.Now().UTC()
-			return nil
-		})
-		if err != nil {
-			r.o.Logger.Printf("investigate %s: save evidence: %v", j.id, err)
-			return
-		}
-		r.o.Logger.Printf("investigate %s: collected %d evidence queries", j.id, len(ev))
-	}
-
-	// 2. Holmes.
-	if r.o.Holmes == nil {
-		r.finish(j.id, "failed", "holmes is not configured", holmes.Answer{}, nil)
-		return
-	}
-	hctx, cancel := context.WithTimeout(ctx, r.o.Timeout)
-	defer cancel()
-	t0 := time.Now()
-	ask := holmes.BuildAsk(inc, related, start, end)
-	ans, err := r.o.Holmes.Ask(hctx, ask)
+	o := r.Investigate(ctx, inc, related, r.o.Arch)
+	_, err = r.o.Store.Update(j.id, func(i *incident.Incident) error {
+		i.EvidenceMetrics = o.Evidence
+		i.DerivedFacts = o.Derived
+		i.HolmesArch = string(o.Arch)
+		i.HolmesCheck = checkRecord(o)
+		return nil
+	})
 	if err != nil {
-		r.finish(j.id, "failed", err.Error(), holmes.Answer{}, nil)
-		r.o.Logger.Printf("investigate %s: holmes failed after %s: %v", j.id, time.Since(t0).Round(time.Second), err)
-		return
+		r.o.Logger.Printf("investigate %s: save evidence: %v", j.id, err)
 	}
-	result, perr := holmes.ParseResult(ans.Analysis)
-	if perr != nil {
-		// One automatic follow-up: some models end the turn after stating a
-		// plan. Same incident, same claim, so this does not break once-per-incident.
-		r.o.Logger.Printf("investigate %s: answer not parseable (%v, %d tool calls); asking once more", j.id, perr, ans.ToolCalls)
-		ans2, err2 := r.o.Holmes.Ask(hctx, holmes.RetryAsk(ask, ans.Analysis))
-		if err2 == nil {
-			ans2.ToolCalls += ans.ToolCalls
-			ans = ans2
-			result, perr = holmes.ParseResult(ans.Analysis)
-		}
+	r.finish(j.id, o.Status, o.Error, holmes.Answer{Analysis: o.Analysis, ToolCalls: o.ToolCalls}, o.Result)
+	r.o.Logger.Printf("investigate %s: %s holmes %s in %s (%d tool calls, %d holmes calls)",
+		j.id, o.Arch, o.Status, time.Duration(o.DurationMS)*time.Millisecond, o.ToolCalls, o.HolmesCalls)
+}
+
+// checkRecord summarizes the checker part of an outcome for the incident.
+func checkRecord(o Outcome) map[string]any {
+	if len(o.Checks) == 0 && o.CheckError == "" {
+		return nil
 	}
-	status, msg := "done", ""
-	if perr != nil {
-		status, msg = "failed", "answer received but not parseable: "+perr.Error()
+	m := map[string]any{"rechecked": o.Rechecked}
+	if o.CheckError != "" {
+		m["error"] = o.CheckError
 	}
-	r.finish(j.id, status, msg, ans, result)
-	r.o.Logger.Printf("investigate %s: holmes %s in %s (%d tool calls)", j.id, status, time.Since(t0).Round(time.Second), ans.ToolCalls)
+	if len(o.Checks) > 0 {
+		m["verdicts"] = o.Checks
+	}
+	return m
 }
 
 func (r *Runner) finish(id, status, msg string, ans holmes.Answer, result map[string]any) {

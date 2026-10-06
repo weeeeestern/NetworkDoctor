@@ -52,6 +52,12 @@ backend:
     holmesModel: gateway-luna
     # Rule 1-8 scenario rules exist (rules/networkdoctor-scenario-rules.yaml),
     # so smoke alerts go back to pipeline-only: chart default "smoke-".
+    # Automatic investigations stay on the original pipeline; eval/run.py
+    # picks the architecture per run through POST /eval/runs.
+    arch: baseline
+  # The key Secret (jev-api) is optional: without it derived+jev is skipped.
+  jev:
+    enabled: true
   persistence:
     # Lab storage comes from the local-path-provisioner child app (default
     # StorageClass `local-path`). storageClass is left empty on purpose so the

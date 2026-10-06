@@ -230,6 +230,22 @@ backend:
     # Evidence and investigation window: startsAt +/- this.
     evidenceWindow: 15m
     maxBodyBytes: "4194304"
+    # Investigation architecture for automatic runs (see eval/README.md):
+    #   baseline     evidence snapshot + Holmes
+    #   derived      + deterministic scenario facts (per-pod ratios, onset
+    #                timing, kernel limit changes) computed by the backend
+    #   derived+jev  + a Jev consistency check of the conclusion and one
+    #                re-examination when it fails (needs backend.jev)
+    # POST /eval/runs can run any architecture on demand regardless.
+    arch: baseline
+  # Jev (TypeSafe System One) conclusion checker for derived+jev. SaaS:
+  # api.typesafe.ai must be reachable, so not for air-gapped clusters. The
+  # key is read from a Secret you create; the pod starts without it.
+  jev:
+    enabled: false
+    secretName: jev-api
+    secretKey: JEV_API_KEY
+    model: jev-latest
   extraEnv: []
 
   persistence:

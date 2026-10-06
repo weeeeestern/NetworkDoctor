@@ -1,0 +1,22 @@
+{
+  "_comment": "Replay corpus: incidents produced by scripts/repro on the on-prem lab (2026-10-01/02), with what each run actually broke. Re-investigated by POST /eval/runs against the same Prometheus history (retention 10d: usable until about 2026-10-11). Kubernetes objects from the runs (repro pods, NetworkPolicy) no longer exist, which affects every architecture equally.",
+  "cases": [
+    {"id": "r3-a",  "incident_id": "inc-3685084427ff", "expect": "rule-3", "truth": {"node": "worker01"}},
+    {"id": "r7-a",  "incident_id": "inc-c042cf9c06ae", "expect": "rule-7", "truth": {"service": "catshop"}},
+    {"id": "r8-a",  "incident_id": "inc-63535f76354b", "expect": "rule-8", "truth": {"policy": "nd-repro-deny", "target": "nd-r8-target"}},
+    {"id": "r6-x",  "incident_id": "inc-a50c8c989ba8", "expect": "rule-6", "hard": "rule-8 TCP client's denied connects on worker02, grouped with a rule-2 NIC fault",
+                    "truth": {"node": "worker02", "cause": ["nd-repro-deny", "networkpolicy", "network policy", "policy", "nd-r8-client", "denied"]}},
+    {"id": "r8-b",  "incident_id": "inc-cc2980da5542", "expect": "rule-8", "truth": {"policy": "nd-repro-deny", "target": "nd-r8-target"}},
+    {"id": "r2-b",  "incident_id": "inc-3dadaad005fb", "expect": "rule-2", "truth": {"node": "worker02", "iface": "eno1"}},
+    {"id": "r6-a",  "incident_id": "inc-7678e2c02483", "expect": "rule-6", "truth": {"node": "worker02", "cause": ["refused", "closed port", "port 9", "nd-r6-client", "RST"]}},
+    {"id": "r4-a",  "incident_id": "inc-9a4dfe504f3a", "expect": "rule-4", "truth": {"node": "worker02", "pod": "bs6b8"}},
+    {"id": "r3-b",  "incident_id": "inc-6e853f3c1d5d", "expect": "rule-3", "truth": {"node": "worker02"}},
+    {"id": "r1-a",  "incident_id": "inc-5b452f22707d", "expect": "rule-1", "truth": {"node": "worker01", "client": "nd-r1-client"}},
+    {"id": "r1x-a", "incident_id": "inc-bdf91a34aaf7", "expect": "rule-1-cross", "truth": {"node": "worker02", "client": "nd-r1-client"}},
+    {"id": "r1x-b", "incident_id": "inc-7e53661c4e01", "expect": "rule-1-cross", "hard": "started 6 min after the previous run; its tail is inside the lookback",
+                    "truth": {"node": "worker02", "client": "nd-r1-client"}},
+    {"id": "r1x-c", "incident_id": "inc-f58c490f7a9a", "expect": "rule-1-cross", "truth": {"node": "worker02", "client": "nd-r1-client"}},
+    {"id": "r4-b",  "incident_id": "inc-95fa5cf0f9ea", "expect": "rule-4", "truth": {"node": "worker02", "pod": "bs6b8"}},
+    {"id": "r4-c",  "incident_id": "inc-9ed3901d11ee", "expect": "rule-4", "truth": {"node": "worker02", "pod": "bs6b8"}}
+  ]
+}

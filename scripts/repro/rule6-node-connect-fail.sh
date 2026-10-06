@@ -23,6 +23,8 @@ TARGET_IP=$(kubectl -n "$ND_DEMO_NS" get pod nd-r6-target -o jsonpath='{.status.
 nd_pod nd-r6-client "$NODE" pod
 nd_log "failing node=$NODE target=$TARGET_IP:$PORT on $PEER duration=${DURATION}s"
 
+nd_truth rule-6 node "$NODE"
+for c in refused "closed port" "port $PORT" nd-r6-client RST; do nd_truth rule-6 cause "$c"; done
 SINCE=$(nd_now)
 nd_fault_window "$DURATION"
 nd_bg nd-r6-client "$DURATION" "

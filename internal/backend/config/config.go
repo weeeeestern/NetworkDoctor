@@ -8,6 +8,7 @@ package config
 import (
 	"flag"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -50,6 +51,17 @@ type Config struct {
 	CorrelationWindow time.Duration
 	// GroupWait delays a group's investigation so co-firing alerts join first.
 	GroupWait time.Duration
+
+	// Arch is the architecture for automatic investigations:
+	// baseline | derived | derived+jev.
+	Arch string
+	// EvalDir stores evaluation runs (POST /eval/runs); "" disables them.
+	EvalDir string
+	// JevURL, JevModel and JevAPIKey configure the derived+jev checker. The
+	// key comes from the JEV_API_KEY environment variable only (Secret).
+	JevURL    string
+	JevModel  string
+	JevAPIKey string
 }
 
 // ParseFlags parses CLI flags. Environment variables ND_LISTEN, ND_DATA_DIR,
@@ -73,7 +85,17 @@ func ParseFlags() Config {
 	flag.IntVar(&cfg.Workers, "workers", int(envInt64Or("ND_WORKERS", 1)), "concurrent investigations")
 	flag.DurationVar(&cfg.CorrelationWindow, "correlation-window", envDurationOr("ND_CORRELATION_WINDOW", 10*time.Minute), "group incidents on the same node/service within this window (0 disables)")
 	flag.DurationVar(&cfg.GroupWait, "group-wait", envDurationOr("ND_GROUP_WAIT", 90*time.Second), "wait before investigating a group so co-firing alerts join")
+	flag.StringVar(&cfg.Arch, "arch", envOr("ND_ARCH", "baseline"), "investigation architecture: baseline, derived or derived+jev")
+	flag.StringVar(&cfg.EvalDir, "eval-dir", envOr("ND_EVAL_DIR", ""), "directory for evaluation runs (default: <data-dir>/_eval, on the same volume)")
+	flag.StringVar(&cfg.JevURL, "jev-url", envOr("ND_JEV_URL", "https://api.typesafe.ai/v1/systemone"), "Jev System One endpoint (derived+jev)")
+	flag.StringVar(&cfg.JevModel, "jev-model", envOr("ND_JEV_MODEL", "jev-latest"), "Jev model (derived+jev)")
 	flag.Parse()
+	cfg.JevAPIKey = os.Getenv("JEV_API_KEY")
+	if cfg.EvalDir == "" {
+		// Inside the data volume: the root filesystem is read-only in the chart,
+		// and the incident store ignores subdirectories.
+		cfg.EvalDir = filepath.Join(cfg.DataDir, "_eval")
+	}
 	return cfg
 }
 

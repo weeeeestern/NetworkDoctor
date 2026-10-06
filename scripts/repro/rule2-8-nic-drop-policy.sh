@@ -54,6 +54,10 @@ spec:
 EOF
 nd_log "rule-8: deny-all ingress on nd-r8-target ($TARGET_IP)"
 
+nd_truth rule-2 node "$NODE"
+nd_truth rule-2 iface "$IFACE"
+nd_truth rule-8 policy nd-repro-deny
+nd_truth rule-8 target nd-r8-target
 SINCE=$(nd_now)
 nd_fault_window "$DURATION"
 nd_bg nd-r2-sender "$DURATION" "python3 -c \"

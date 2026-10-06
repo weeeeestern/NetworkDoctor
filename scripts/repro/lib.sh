@@ -21,6 +21,9 @@
 #   ND_PF_PORT       local port for the backend port-forward (18080)
 #   ND_CONTEXT_DENY  regex of kubectl contexts to refuse    (prod)
 #   ND_QUIET_MIN     minutes an earlier incident must be resolved (15)
+#   ND_TRUTH_FILE    write ground truth (what was broken) here, for eval/run.py
+#   ND_HOLD_FILE     after the wait, keep the fault while this file exists
+#                    (eval/run.py live mode investigates during the fault)
 
 set -uo pipefail
 
@@ -175,6 +178,13 @@ nd_bg() {
   ND_BG_PIDS+=("$!")
 }
 
+# nd_truth <template> <key> <value>: record ground truth for evaluation.
+# Repeat a key to give alternatives. No-op unless ND_TRUTH_FILE is set.
+nd_truth() {
+  [[ -n "${ND_TRUTH_FILE:-}" ]] || return 0
+  printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$ND_TRUTH_FILE"
+}
+
 # ---------------------------------------------------------------- backend
 nd_backend_connect() {
   kubectl -n "$ND_NS" port-forward "svc/$ND_BACKEND_SVC" "$ND_PF_PORT:8080" \
@@ -281,7 +291,10 @@ nd_wait() {
   end=$(($(date +%s) + max * 60))
   nd_log "waiting up to ${max}m for: $rules"
   while (($(date +%s) < end)); do
-    if ((ND_FAULT_END && $(date +%s) >= ND_FAULT_END)); then nd_restore; ND_FAULT_END=0; fi
+    if ((ND_FAULT_END && $(date +%s) >= ND_FAULT_END)) && [[ ! -e "${ND_HOLD_FILE:-/nonexistent}" ]]; then
+      nd_restore
+      ND_FAULT_END=0
+    fi
     if nd_status "$since" "$rules" >"$ND_LOGDIR/status.txt" 2>&1; then break; fi
     nd_log "$(grep -cE ' (WAIT|FAIL) ' "$ND_LOGDIR/status.txt") of $(wc -w <<<"$rules") rules pending"
     sleep 20
@@ -289,4 +302,17 @@ nd_wait() {
   echo
   echo "== NetworkDoctor repro result (since $since)"
   nd_status "$since" "$rules" --final
+  local rc=$?
+  nd_hold
+  return "$rc"
+}
+
+# nd_hold: keep the fault running while ND_HOLD_FILE exists (max 60 min), so
+# an evaluation harness can investigate the live fault. The fault window is
+# not enforced while holding.
+nd_hold() {
+  [[ -n "${ND_HOLD_FILE:-}" && -e "${ND_HOLD_FILE}" ]] || return 0
+  nd_log "holding the fault while $ND_HOLD_FILE exists"
+  local end=$(($(date +%s) + 3600))
+  while [[ -e "$ND_HOLD_FILE" ]] && (($(date +%s) < end)); do sleep 5; done
 }
