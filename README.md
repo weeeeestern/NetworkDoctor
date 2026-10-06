@@ -204,9 +204,3 @@ API: `GET /incidents`, `GET /incidents/{id}`, `GET /incidents/{id}/report.md`, `
 ## Background
 
 프로젝트를 시작하기 전, 팀원들이 공통 배경지식을 맞추기 위해 Kubernetes/Linux 네트워크, 커널 메트릭, 네트워크 토폴로지를 중심으로 사전 스터디를 진행했습니다. 자료는 [prestudy](./prestudy) 폴더에 있습니다.
-
-## 남은 일
-
-- 평가 반복 측정(장애당 3회)과 Rule 6용 파생 사실 추가, 결과가 유지되면 자동 조사 기본값을 `derived`로 전환
-- Grafana 대시보드, Incident UI
-- cilium-agent ServiceMonitor 포트(9962) 정정
