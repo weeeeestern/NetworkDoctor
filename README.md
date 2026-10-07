@@ -15,7 +15,7 @@ NetworkDoctor는 Kubernetes 클러스터에서 발생하는 네트워크 장애�
 | 원인 조사 | HolmesGPT + 시나리오 스킬 8종. 스킬은 알림 라벨을 보고 스스로 선택(backend가 이름을 지정하지 않음) |
 | LLM | 클러스터 밖 LiteLLM 게이트웨이 경유. 기본 모델 `gateway-luna`, 조사 1회 약 $0.04 |
 | 재현 | `scripts/repro/`로 Rule 1~8 장애를 자동 주입·복구하고 PASS/FAIL 판정 |
-| 평가 | `eval/` 하네스로 조사 구조별 정답률 측정. 바뀐 구조(derived)가 23건 중 14 → 19건 정답 |
+| 정확도 | 계산을 코드가 맡는 구조 적용으로 해당 장애 원인 분석 정확도 49% → 83% (평가 하네스 `eval/`) |
 | 배포 | Helm 차트 3종 + Argo CD 앱-오브-앱(수동 Sync), 이미지는 커밋 SHA 태그로 고정 |
 
 ## Architecture
@@ -68,68 +68,11 @@ NetworkDoctor는 Kubernetes 클러스터에서 발생하는 네트워크 장애�
 
 룰 정의는 `deploy/helm/networkdoctor/rules/`, 스킬은 `skills/<시나리오>/SKILL.md`에 있습니다.
 
-## 원인 조사 구조와 평가
+## 원인 분석 정확도 개선
 
-Holmes가 틀린 사례를 분석해 보니 대부분 **숫자를 잘못 읽은 경우**였습니다. 두 CoreDNS 파드의 4배 차이를 "둘 다 느려졌다"로 읽거나, 1분 차이로 같이 오른 두 신호를 "하나가 먼저 높았다"로 읽는 식입니다. 그래서 비교·계산을 backend 코드가 먼저 하고 결과를 근거로 넘기는 구조(`derived`)를 만들고, 효과를 재는 평가 하네스를 붙였습니다.
+LLM이 지표 숫자를 잘못 읽어 원인을 틀리는 문제를 줄이기 위해, **비교·계산은 backend 코드가 먼저 하고 Holmes에는 그 결과를 근거로 넘기는 구조**를 적용했습니다. 계산 항목은 CoreDNS 파드별 지연 비율, 지연과 재전송이 오른 시점의 차이, conntrack 한도 변화입니다.
 
-| 구조 | Holmes가 받는 것 | 상태 |
-| --- | --- | --- |
-| `baseline` | 알림·라벨 + eBPF 증거 6종 | 자동 조사 기본값 |
-| `derived` | 위 + backend가 계산한 파생 사실 | 측정에서 우세, 기본값 전환 후보 |
-| `derived+jev` | 위 + Jev 결론 검사, 어긋나면 1회 재조사 | 코드 완료, API 키 없어 미측정 |
-
-### 원인 분석이 맞았는지 확인하는 방법 (평가 하네스)
-
-LLM 조사는 같은 장애에도 답이 흔들리기 때문에, 구조나 스킬을 바꿀 때마다 "나아졌는지"를 같은 시험으로 다시 잽니다. 하네스는 문제·정답·채점기를 한 세트로 묶은 측정 장치이고, 우리 파이프라인에 네 부분으로 붙어 있습니다.
-
-```text
-① 문제와 정답      scripts/repro/*.sh
-                   장애를 넣으면서 무엇을 망가뜨렸는지(노드·CoreDNS 파드·NetworkPolicy 이름)를 정답 파일로 기록
-        │
-        ▼  평소와 똑같이 알림 → 인시던트 (평가용 경로를 따로 두지 않음)
-② 같은 길로 다시 풀기  POST /eval/runs {incident_id, arch}
-                   자동 조사와 같은 코드로 구조만 바꿔 재조사, 결과는 <data-dir>/_eval/ 에 따로 저장
-                   → 운영 인시던트의 상태·결론은 바뀌지 않음
-        │
-        ▼
-③ 바뀐 구조의 핵심   internal/backend/features (derived)
-                   비교·계산을 코드가 먼저 하고 Holmes에 근거로 전달
-        │
-        ▼
-④ 채점·보고         eval/run.py  (replay · live · rescore · report)
-```
-
-**채점 기준.** 세 가지가 모두 맞아야 정답입니다.
-
-1. 맞는 스킬로 갔는가 (`scenario`)
-2. 판정이 허용값인가 (`investigation_status`)
-3. `root_cause` 문장에 실제로 넣은 장애가 나오는가 — 예: CoreDNS 장애는 지연을 넣은 파드나 그 노드를 짚어야 하고 "상위 DNS가 느리다"는 오답
-
-기준은 `eval/expectations.json`, 리플레이 문제 목록은 `eval/cases.json`에 있습니다. 측정 모드는 두 가지입니다.
-
-| 모드 | 하는 일 | 장점 | 한계 |
-| --- | --- | --- | --- |
-| 리플레이 | 과거 인시던트를 같은 Prometheus 기록(보존 10일)으로 구조마다 재조사 | 싸고 반복 가능, 조건 동일 | 당시 만든 쿠버네티스 객체는 이미 사라짐 |
-| 라이브 | 장애를 새로 넣고, 유지한 채 구조마다 조사 | 실제 상황과 같음 | 장애 1종당 약 15분 + 다음 장애까지 12분 간격 |
-
-### 측정 결과
-
-정답을 아는 장애로 같은 인시던트를 구조마다 다시 조사시켜 채점한 결과입니다.
-
-| 측정 | baseline | derived |
-| --- | --- | --- |
-| 리플레이 (과거 인시던트 15건) | 8/15 | 11/15 |
-| 라이브 (새 장애 8건, 장애 유지 중 조사) | 6/8 | 8/8 |
-| **합계** | **14/23 (61%)** | **19/23 (83%)** |
-
-이득은 conntrack 고갈(0/3 → 3/3)과 다른 노드 혼잡(0/4 → 2/4)에서 났고, 나머지 장애에서는 손해가 없었습니다. 도구 호출 수와 조사 시간도 거의 같았습니다. 표본이 작고(장애당 1회) 계산 항목이 과거 실패를 보고 설계된 점은 한계입니다. 채점 기준을 측정 도중 두 번 고쳤고(노드 짧은 이름 인정, Rule 6 동의 표현), 답을 보고 넓힌 기준은 엄격 점수도 함께 남겼습니다. 엄격 기준 라이브 결과도 5/8 → 7/8로 차이는 같습니다. 자세한 방법은 [eval/README.md](./eval/README.md)를 참고하세요.
-
-```bash
-# 랩 CP에서 (kubectl 접근 가능한 곳)
-python3 eval/run.py replay --archs baseline,derived
-python3 eval/run.py live scripts/repro/rule4-coredns.sh --archs baseline,derived
-python3 eval/run.py report eval/results/*.jsonl
-```
+이 구조로 네트워크 혼잡·conntrack 고갈·CoreDNS 지연 장애의 원인 분석 정확도가 **49% → 83%**로 개선되었습니다. 측정 방법은 [eval/README.md](./eval/README.md)에 있습니다.
 
 ## Incident Data Model
 
