@@ -55,9 +55,10 @@ backend:
     evalHolmesModel: gateway-luna-eval
     # Rule 1-8 scenario rules exist (rules/networkdoctor-scenario-rules.yaml),
     # so smoke alerts go back to pipeline-only: chart default "smoke-".
-    # Automatic investigations stay on the original pipeline; eval/run.py
-    # picks the architecture per run through POST /eval/runs.
-    arch: baseline
+    # Automatic investigations use derived facts (2026-10-07: 47% -> 79% on
+    # the scenarios with facts, no change elsewhere). eval/run.py still picks
+    # any architecture per run through POST /eval/runs.
+    arch: derived
   # The key Secret (jev-api) is optional: without it derived+jev is skipped.
   jev:
     enabled: true
