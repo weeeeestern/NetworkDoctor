@@ -15,7 +15,7 @@ NetworkDoctor는 Kubernetes 클러스터에서 발생하는 네트워크 장애�
 | 원인 조사 | HolmesGPT + 시나리오 스킬 8종. 스킬은 알림 라벨을 보고 스스로 선택(backend가 이름을 지정하지 않음) |
 | LLM | 클러스터 밖 LiteLLM 게이트웨이 경유. 기본 모델 `gateway-luna`, 조사 1회 약 $0.04 |
 | 재현 | `scripts/repro/`로 Rule 1~8 장애를 자동 주입·복구하고 PASS/FAIL 판정 |
-| 정확도 | 계산을 코드가 맡는 구조 적용으로 해당 장애 원인 분석 정확도 49% → 83% (평가 하네스 `eval/`) |
+| 정확도 | 계산을 코드가 맡는 구조 적용으로 해당 장애 원인 분석 정확도 47% → 79% (평가 하네스 `eval/`) |
 | 배포 | Helm 차트 3종 + Argo CD 앱-오브-앱(수동 Sync), 이미지는 커밋 SHA 태그로 고정 |
 
 ## Architecture
@@ -36,7 +36,7 @@ NetworkDoctor는 Kubernetes 클러스터에서 발생하는 네트워크 장애�
 │  ├─ POST /webhooks/alertmanager   인시던트 생성 (fingerprint|startsAt 멱등)
 │  ├─ 상관 그룹                      같은 노드(없으면 서비스) 10분 창, 그룹당 조사 1회
 │  ├─ 증거 수집                      eBPF PromQL 6종
-│  ├─ 파생 사실 (derived 구조)        CoreDNS 파드 비율 · 신호 시점차 · conntrack 한도 변화
+│  ├─ 파생 사실 (derived 구조)        CoreDNS 파드 비율 · 신호 시점차 · conntrack 한도 · 연결 실패 성격
 │  ├─ HolmesGPT 호출 → 공통 스키마 파싱 → report.md
 │  └─ POST /eval/runs               구조를 골라 재조사 (평가용, 인시던트 불변)
 │
@@ -70,9 +70,9 @@ NetworkDoctor는 Kubernetes 클러스터에서 발생하는 네트워크 장애�
 
 ## 원인 분석 정확도 개선
 
-LLM이 지표 숫자를 잘못 읽어 원인을 틀리는 문제를 줄이기 위해, **비교·계산은 backend 코드가 먼저 하고 Holmes에는 그 결과를 근거로 넘기는 구조**를 적용했습니다. 계산 항목은 CoreDNS 파드별 지연 비율, 지연과 재전송이 오른 시점의 차이, conntrack 한도 변화입니다.
+LLM이 지표 숫자를 잘못 읽어 원인을 틀리는 문제를 줄이기 위해, **비교·계산은 backend 코드가 먼저 하고 Holmes에는 그 결과를 근거로 넘기는 구조**를 적용했습니다. 계산 항목은 CoreDNS 파드별 지연 비율, 지연과 재전송이 오른 시점의 차이, conntrack 한도 변화, 연결 실패가 거부인지 드롭인지와 직전에 생긴 파드입니다.
 
-이 구조로 네트워크 혼잡·conntrack 고갈·CoreDNS 지연 장애의 원인 분석 정확도가 **49% → 83%**로 개선되었습니다. 측정 방법은 [eval/README.md](./eval/README.md)에 있습니다.
+이 구조로 네트워크 혼잡·conntrack 고갈·CoreDNS 지연·노드 국소 장애의 원인 분석 정확도가 **47% → 79%**로 개선되었습니다. 측정 방법은 [eval/README.md](./eval/README.md)에 있습니다.
 
 ## Incident Data Model
 
