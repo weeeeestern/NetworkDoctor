@@ -12,13 +12,19 @@ import (
 
 type fakeProm map[string][]prometheus.Series // keyed by a substring of the query
 
+// QueryRange returns the series of the longest key contained in the query,
+// so overlapping keys resolve deterministically.
 func (f fakeProm) QueryRange(_ context.Context, q string, _, _ time.Time, _ time.Duration) ([]prometheus.Series, error) {
-	for k, v := range f {
-		if strings.Contains(q, k) {
-			return v, nil
+	best := ""
+	for k := range f {
+		if strings.Contains(q, k) && len(k) > len(best) {
+			best = k
 		}
 	}
-	return nil, nil
+	if best == "" {
+		return nil, nil
+	}
+	return f[best], nil
 }
 
 var t0 = time.Date(2026, 10, 2, 5, 30, 0, 0, time.UTC)
@@ -120,5 +126,33 @@ func TestMissingDataIsSaidOutLoud(t *testing.T) {
 	got := (&Deriver{Prom: fakeProm{}}).Derive(context.Background(), &incident.Incident{Scenario: "coredns-degradation"}, nil, t0, t0)
 	if len(got) != 1 || !strings.HasPrefix(got[0].Observation, "unavailable") {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestNodeLocalizedRefusalsAndCandidatePod(t *testing.T) {
+	created := float64(t0.Add(-30 * time.Second).Unix())
+	p := fakeProm{
+		"sum by (node) (rate(ebpf_tcp_connect_failed_total[1m])) / clamp_min": {
+			ser(map[string]string{"node": "worker02-x"}, 0.01, 0.7, 0.71, 0.02),
+			ser(map[string]string{"node": "worker01-x"}, 0.01, 0.02, 0.01, 0.01),
+		},
+		"sum by (node) (rate(ebpf_tcp_connect_failed_total[1m]))": {ser(map[string]string{"node": "worker02-x"}, 0, 7.5, 7.6, 0)},
+		"ebpf_tcp_retransmits_total": {ser(map[string]string{"node": "worker02-x"}, 0, 0.01, 0, 0)},
+		"kube_pod_created":           {ser(map[string]string{"namespace": "demo", "pod": "nd-r6-client"}, created)},
+	}
+	inc := &incident.Incident{Scenario: "node-localized-failure", StartsAt: t0.Add(5 * time.Minute),
+		AlertLabels: map[string]string{"node": "worker02-x"}}
+	got := (&Deriver{Prom: p}).Derive(context.Background(), inc, nil, t0.Add(-10*time.Minute), t0.Add(10*time.Minute))
+	if len(got) != 3 {
+		t.Fatalf("want 3 facts, got %+v", got)
+	}
+	if !strings.Contains(got[0].Observation, "peak 71%") || !strings.Contains(got[0].Observation, "other node 2%") {
+		t.Fatalf("profile: %s", got[0].Observation)
+	}
+	if !strings.Contains(got[1].Observation, "actively refused or reset") {
+		t.Fatalf("signature: %s", got[1].Observation)
+	}
+	if !strings.Contains(got[2].Observation, "demo/nd-r6-client") || !strings.Contains(got[2].Observation, "1m30s before failures began") {
+		t.Fatalf("pods: %s", got[2].Observation)
 	}
 }

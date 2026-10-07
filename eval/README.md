@@ -17,6 +17,7 @@ code instead:
 | coredns-degradation | Per-pod p99 and the slowest/fastest ratio at similar load (ratio 2 or more points at one pod) |
 | network-congestion | When latency and retransmits crossed their thresholds, the onset lag, their correlation, and pods started on the retransmitting node before the alert |
 | conntrack-exhaustion, dns-conntrack-correlation | Whether `nf_conntrack_entries_limit` changed during the window |
+| node-localized-failure | The failing node's connect failure ratio and onset, whether failures come without retransmits (refused/reset) or with them (dropped), and pods started on that node just before the failures |
 
 ## How a run is scored
 

@@ -1,7 +1,8 @@
 // Package features computes deterministic, scenario-specific facts for an
 // incident ("derived facts"): numbers the LLM tends to misread when it has to
 // work them out itself, such as the latency ratio between CoreDNS pods, which
-// of two signals rose first, or whether a kernel limit was changed.
+// of two signals rose first, whether a kernel limit was changed, or whether
+// failed connects are refusals or drops.
 //
 // Facts are computed in code from PromQL and handed to Holmes as evidence.
 // They state measurements and the threshold readings the skills define; the
@@ -52,6 +53,8 @@ func (d *Deriver) Derive(ctx context.Context, inc *incident.Incident, related []
 			out = append(out, d.coreDNS(ctx, start, end)...)
 		case "network-congestion":
 			out = append(out, d.congestion(ctx, i, start, end)...)
+		case "node-localized-failure":
+			out = append(out, d.nodeLocalized(ctx, i, start, end)...)
 		case "conntrack-exhaustion", "dns-conntrack-correlation":
 			if !seen["conntrack-limit"] {
 				seen["conntrack-limit"] = true
@@ -208,30 +211,9 @@ func (d *Deriver) congestion(ctx context.Context, inc *incident.Incident, start,
 	out := []incident.Evidence{fact("latency_retransmit_timing", qLat+"  |  "+qRet, obs.String())}
 
 	// Pods that started on the retransmitting node before the alert are
-	// candidate clients (kube-state-metrics keeps them after deletion). Pods
-	// created after the alert cannot have caused it.
-	upper := end
-	if !inc.StartsAt.IsZero() && inc.StartsAt.Before(end) {
-		upper = inc.StartsAt
-	}
-	qNew := fmt.Sprintf(`max by (namespace, pod) (kube_pod_created * on (namespace, pod) group_left () kube_pod_info{node=%q})`, node)
-	if s, err := d.query(ctx, qNew, start, end); err == nil {
-		var names []string
-		for _, x := range s {
-			if v, _ := peak(x.Samples); !math.IsNaN(v) {
-				created := time.Unix(int64(v), 0).UTC()
-				if !created.Before(start) && !created.After(upper) {
-					names = append(names, fmt.Sprintf("%s/%s (created %s)", x.Labels["namespace"], x.Labels["pod"], created.Format("15:04:05Z")))
-				}
-			}
-		}
-		sort.Strings(names)
-		o := "none"
-		if len(names) > 0 {
-			o = strings.Join(names, ", ")
-		}
-		out = append(out, fact("pods_started_on_retransmit_node", qNew,
-			fmt.Sprintf("pods created on %s between the window start and the alert: %s", shortNode(node), o)))
+	// candidate clients (kube-state-metrics keeps them after deletion).
+	if f, ok := d.podsStarted(ctx, "pods_started_on_retransmit_node", node, inc, start, end, time.Time{}); ok {
+		out = append(out, f)
 	}
 	return out
 }
@@ -277,6 +259,137 @@ func (d *Deriver) conntrackLimit(ctx context.Context, start, end time.Time) []in
 			". A limit that drops during an incident is a configuration change (sysctl), not organic table growth."
 	}
 	return []incident.Evidence{fact("conntrack_limit_changes", qConntrackLimit, obs)}
+}
+
+// podsStarted lists pods created on node between the window start and the
+// alert (pods created after the alert cannot have caused it). If ref is set,
+// each pod also shows how long before ref it was created.
+func (d *Deriver) podsStarted(ctx context.Context, name, node string, inc *incident.Incident, start, end, ref time.Time) (incident.Evidence, bool) {
+	upper := end
+	if !inc.StartsAt.IsZero() && inc.StartsAt.Before(end) {
+		upper = inc.StartsAt
+	}
+	q := fmt.Sprintf(`max by (namespace, pod) (kube_pod_created * on (namespace, pod) group_left () kube_pod_info{node=%q})`, node)
+	s, err := d.query(ctx, q, start, end)
+	if err != nil {
+		return fact(name, q, unavailable(err)), true
+	}
+	var names []string
+	for _, x := range s {
+		// A pod name can be reused (deleted and created again), so check
+		// every distinct creation time in the window, not just the latest.
+		seen := map[int64]bool{}
+		for _, smp := range x.Samples {
+			if math.IsNaN(smp.V) || seen[int64(smp.V)] {
+				continue
+			}
+			seen[int64(smp.V)] = true
+			created := time.Unix(int64(smp.V), 0).UTC()
+			if created.Before(start) || created.After(upper) {
+				continue
+			}
+			n := fmt.Sprintf("%s/%s (created %s", x.Labels["namespace"], x.Labels["pod"], created.Format("15:04:05Z"))
+			if !ref.IsZero() {
+				if lead := ref.Sub(created).Round(time.Second); lead >= 0 {
+					n += fmt.Sprintf(", %s before failures began", lead)
+				} else {
+					n += fmt.Sprintf(", %s after failures began", -lead)
+				}
+			}
+			names = append(names, n+")")
+		}
+	}
+	sort.Strings(names)
+	o := "none"
+	if len(names) > 0 {
+		o = strings.Join(names, ", ")
+	}
+	return fact(name, q, fmt.Sprintf("pods created on %s between the window start and the alert: %s", shortNode(node), o)), true
+}
+
+// ------------------------------------------------------- node-localized
+
+const (
+	qConnFailRatio = `sum by (node) (rate(ebpf_tcp_connect_failed_total[1m])) / clamp_min(sum by (node) (rate(ebpf_tcp_connect_attempts_total[1m])), 0.001)`
+	qConnFail      = `sum by (node) (rate(ebpf_tcp_connect_failed_total[1m]))`
+	qRetrans1m     = `sum by (node) (rate(ebpf_tcp_retransmits_total[1m]))`
+)
+
+// nodeLocalized describes Rule 6: which node fails, since when, whether the
+// failures look like refusals (no packet loss) or loss, and which pods
+// started on that node just before.
+func (d *Deriver) nodeLocalized(ctx context.Context, inc *incident.Incident, start, end time.Time) []incident.Evidence {
+	ratio, err := d.query(ctx, qConnFailRatio, start, end)
+	if err != nil || len(ratio) == 0 {
+		return []incident.Evidence{fact("connect_failure_profile", qConnFailRatio, unavailable(err))}
+	}
+	node := inc.AlertLabels["node"]
+	var fs *prometheus.Series
+	for i := range ratio {
+		if node != "" && ratio[i].Labels["node"] == node {
+			fs = &ratio[i]
+		}
+	}
+	if fs == nil {
+		best := -1.0
+		for i := range ratio {
+			if v, _ := peak(ratio[i].Samples); v > best {
+				best, fs = v, &ratio[i]
+			}
+		}
+		node = fs.Labels["node"]
+	}
+	rPeak, rAt := peak(fs.Samples)
+	on, off := episode(fs.Samples, 0.1)
+	others := 0.0
+	for i := range ratio {
+		if ratio[i].Labels["node"] != node {
+			if v, _ := peak(ratio[i].Samples); v > others {
+				others = v
+			}
+		}
+	}
+	out := []incident.Evidence{fact("connect_failure_profile", qConnFailRatio, fmt.Sprintf(
+		"%s connect failure ratio peak %.0f%% at %s, above 10%% %s; highest on any other node %.0f%%.",
+		shortNode(node), 100*rPeak, rAt.Format("15:04:05Z"), span(on, off), 100*others))}
+
+	// Failures without retransmits mean connections are refused or reset at
+	// the destination, not lost on the way.
+	fail, _ := d.query(ctx, qConnFail, start, end)
+	ret, _ := d.query(ctx, qRetrans1m, start, end)
+	fPeak, rtPeak := pick(fail, node), pick(ret, node)
+	reading := "Reading: failures come with retransmits — SYNs are being dropped, either by packet loss on the path or by a policy that drops rather than rejects (check NetworkPolicy/Hubble drops)."
+	switch {
+	case math.IsNaN(fPeak) || math.IsNaN(rtPeak):
+		reading = "Reading: unavailable (missing series)."
+	case fPeak >= 1 && rtPeak < 0.2:
+		reading = "Reading: many failed connects but almost no retransmits — the connections are actively refused or reset (destination port not listening, or a reject rule), not dropped by the network or the NIC."
+	}
+	out = append(out, fact("connect_failure_signature", qConnFail+"  |  "+qRetrans1m, fmt.Sprintf(
+		"on %s: failed connects peak %s/s, TCP retransmits peak %s/s. %s", shortNode(node), num(fPeak), num(rtPeak), reading)))
+
+	if f, ok := d.podsStarted(ctx, "pods_started_on_failing_node", node, inc, start, end, on); ok {
+		out = append(out, f)
+	}
+	return out
+}
+
+// pick returns the peak of the series for node (NaN if absent).
+func pick(ss []prometheus.Series, node string) float64 {
+	for _, s := range ss {
+		if s.Labels["node"] == node {
+			v, _ := peak(s.Samples)
+			return v
+		}
+	}
+	return math.NaN()
+}
+
+func num(v float64) string {
+	if math.IsNaN(v) {
+		return "n/a"
+	}
+	return fmt.Sprintf("%.2f", v)
 }
 
 // ----------------------------------------------------------------- helpers
