@@ -135,6 +135,34 @@ serviceMonitor:
   metricRelabelings: []
 
 # ---------------------------------------------------------------------------
+# Cilium metrics (only when the cluster's CNI is Cilium)
+# ---------------------------------------------------------------------------
+# PodMonitors on the cilium-agent pods, so collection does not depend on the
+# Services/ServiceMonitors a Cilium install may or may not create. Needs the
+# PodMonitor CRD (Prometheus Operator) and a Prometheus whose
+# podMonitorSelector matches `labels` (default: serviceMonitor.labels).
+#
+# Cilium must expose the metrics itself (Cilium Helm values):
+#   prometheus.enabled: true              -> agent metrics :9962 (cilium_*)
+#   hubble.metrics.enabled: [drop, ...]   -> Hubble metrics :9965 (hubble_*)
+# Rule 8 (NetworkPolicy drops) and the CT-map part of Rule 3 need Hubble
+# "drop". Without Cilium, leave this off; Rules 1-7 work without it.
+cilium:
+  enabled: false
+  namespace: kube-system
+  podSelector:
+    k8s-app: cilium
+  labels: {}
+  interval: 30s
+  scrapeTimeout: 10s
+  agent:
+    enabled: true
+    port: prometheus
+  hubble:
+    enabled: true
+    port: hubble-metrics
+
+# ---------------------------------------------------------------------------
 # Detection layer: Prometheus alert rules (smoke-test set)
 # ---------------------------------------------------------------------------
 # The rule content lives in rules/networkdoctor-smoke-rules.yaml inside the

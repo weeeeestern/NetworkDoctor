@@ -54,12 +54,32 @@ for `agent.iface`. If the three workers differ, either install per node class
 with different values or start with the interface used by the node you test
 first and extend later.
 
-Cilium / Hubble (only matters for Rule 8 later, not for the smoke test):
+Cilium / Hubble (only when the CNI is Cilium; Rule 8 and the CT-map part of
+Rule 3 need it, Rules 1-7 do not):
 
 ```bash
 kubectl -n kube-system exec ds/cilium -- cilium status | head -30
-kubectl -n kube-system get pods,svc | grep -i hubble
+# Which metrics ports does the agent expose? Want prometheus (9962) and hubble-metrics (9965).
+kubectl -n kube-system get ds cilium \
+  -o jsonpath='{range .spec.template.spec.containers[*].ports[*]}{.name}={.containerPort}{"\n"}{end}'
 ```
+
+If `prometheus` (9962) is missing, Cilium was installed without agent metrics.
+Enable them in Cilium's own Helm values (a CNI change; the agents roll):
+
+```yaml
+prometheus:
+  enabled: true          # cilium_* on :9962
+hubble:
+  metrics:
+    enabled: [dns, drop, tcp, flow]   # hubble_* on :9965, "drop" is what Rule 8 reads
+```
+
+Then set `cilium.enabled=true` in the NetworkDoctor chart. It creates one
+PodMonitor on the cilium-agent pods for both ports, independent of any
+Services or ServiceMonitors the Cilium install created. Remove older
+hand-made Cilium/Hubble ServiceMonitors afterwards so series are not scraped
+twice.
 
 Image:
 
