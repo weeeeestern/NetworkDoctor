@@ -146,9 +146,13 @@ serviceMonitor:
 #   prometheus.enabled: true              -> agent metrics :9962 (cilium_*)
 #   hubble.metrics.enabled: [drop, ...]   -> Hubble metrics :9965 (hubble_*)
 # Rule 8 (NetworkPolicy drops) and the CT-map part of Rule 3 need Hubble
-# "drop". Without Cilium, leave this off; Rules 1-7 work without it.
+# "drop"; Rules 1-7 work without Cilium.
+#
+# On by default, but only rendered when serviceMonitor.enabled is true (the
+# Prometheus Operator is there). On a cluster without Cilium no pod matches
+# podSelector, so the PodMonitor has zero targets and does nothing.
 cilium:
-  enabled: false
+  enabled: true
   namespace: kube-system
   podSelector:
     k8s-app: cilium

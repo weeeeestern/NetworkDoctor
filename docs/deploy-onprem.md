@@ -75,9 +75,10 @@ hubble:
     enabled: [dns, drop, tcp, flow]   # hubble_* on :9965, "drop" is what Rule 8 reads
 ```
 
-Then set `cilium.enabled=true` in the NetworkDoctor chart. It creates one
-PodMonitor on the cilium-agent pods for both ports, independent of any
-Services or ServiceMonitors the Cilium install created. Remove older
+Nothing to set in the NetworkDoctor chart: with `serviceMonitor.enabled=true`
+it already creates one PodMonitor on the cilium-agent pods for both ports
+(`cilium.enabled`, default true), independent of any Services or
+ServiceMonitors the Cilium install created. Remove older
 hand-made Cilium/Hubble ServiceMonitors afterwards so series are not scraped
 twice.
 

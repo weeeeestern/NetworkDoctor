@@ -13,7 +13,9 @@ cilium-agent runs with hostNetwork, so instance=<node IP>:<port>, which is
 what the rules join on (kube_node_info.internal_ip).
 */}}
 {{- $c := .Values.cilium }}
-{{- if and $c.enabled (or $c.agent.enabled $c.hubble.enabled) }}
+{{- /* On by default wherever ServiceMonitors are (Prometheus Operator present).
+On a non-Cilium cluster no pod matches the selector: zero targets, no harm. */}}
+{{- if and $c.enabled .Values.serviceMonitor.enabled (or $c.agent.enabled $c.hubble.enabled) }}
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:

@@ -29,13 +29,12 @@ prometheusRule:
   enabled: true
   labels:
     release: prometheus-stack
-# CNI is Cilium 1.19. Hubble metrics (:9965) are exposed; agent metrics
+# CNI is Cilium 1.19; the chart's Cilium PodMonitor is on by default with
+# serviceMonitor.enabled. Hubble metrics (:9965) are exposed; agent metrics
 # (:9962) are not until Cilium runs with prometheus.enabled=true, and until
 # then the agent endpoint just has no targets. The hand-made ServiceMonitors
 # monitoring/cilium-agent (pointed at Envoy :9964) and monitoring/hubble are
-# replaced by this and can be deleted after the sync.
-cilium:
-  enabled: true
+# replaced by it and can be deleted.
 ruleConfigMap:
   enabled: false
 

@@ -97,7 +97,7 @@ API: `GET /incidents`, `GET /incidents/{id}`, `GET /incidents/{id}/report.md`, `
 
 설치·검증·롤백 절차는 [docs/deploy-onprem.md](./docs/deploy-onprem.md)에 있습니다. 요약하면 다음과 같습니다.
 
-1. **전제:** Linux 커널 5.8+ 와 BTF, privileged·hostNetwork 허용, kube-prometheus-stack(Operator CRD 포함), OpenAI 호환 LLM 엔드포인트. CNI가 Cilium이면 Cilium 지표(`prometheus.enabled`, Hubble `drop`)를 켜고 차트의 `cilium.enabled=true`로 수집합니다(Rule 8에 필요).
+1. **전제:** Linux 커널 5.8+ 와 BTF, privileged·hostNetwork 허용, kube-prometheus-stack(Operator CRD 포함), OpenAI 호환 LLM 엔드포인트. CNI가 Cilium이면 차트가 Cilium 지표를 자동으로 수집합니다. Cilium 쪽에서 지표(`prometheus.enabled`, Hubble `drop`)가 켜져 있어야 합니다(Rule 8에 필요).
 2. **차트:** `deploy/helm/networkdoctor`(에이전트·룰·backend), `deploy/helm/holmesgpt`(Holmes + 스킬), `deploy/helm/networkdoctor-demo`(Cat Shop, 랩 전용).
 3. **GitOps:** `deploy/argocd/root-application.yaml`가 `deploy/bootstrap/`의 자식 앱을 만듭니다. 자동 Sync는 끄고 사람이 Sync합니다.
 4. **이미지:** main에 코드가 바뀌면 CI가 `main-<sha>` 이미지를 올리고, 봇이 랩 values의 태그를 고정하는 `[skip ci]` 커밋을 남깁니다. 그 뒤 Sync합니다.

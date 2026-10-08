@@ -25,6 +25,7 @@ fault → eBPF agent / exporters → Prometheus rule → Alertmanager
 | `rule4-coredns.sh` | 4 · coredns-degradation | 400ms netem on the CoreDNS pod's host veth plus uncached lookups through kube-dns | 8 min | 16 min |
 | `rule6-node-connect-fail.sh` | 6 · node-localized-failure | Client on one node connects to a closed port, so only that node fails | 5 min | 14 min |
 | `rule7-app-5xx.sh` | 7 · application-induced-network-bottleneck | ~10 req/s to Cat Shop `/status/500` while the network is quiet | 7 min | 14 min |
+| `rule8-netpol-variants.sh` | 8 · networkpolicy-misconfiguration | `ND_RULE8_MODE`: `ingress-udp`, `ingress-tcp`, `egress` (drop on the sending node), `allow` (must not fire) | 7 min | 14 min |
 | `incidents.sh` | — | Read-only: list incidents, rerun the check, print a report | — | — |
 
 `lib.sh` holds the shared helpers. Every script sources it.
