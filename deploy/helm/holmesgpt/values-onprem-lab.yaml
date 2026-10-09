@@ -19,6 +19,13 @@ holmes:
       model: openai/gpt-luna
       api_base: http://192.168.0.21:4000/v1
       api_key: envRef:LLM_GATEWAY_KEY
+    # Evaluation runs (backend evalHolmesModel): same model, own virtual key
+    # holmesgpt-eval, so gateway spend separates from automatic RCA.
+    # Secret holmes-llm must hold LLM_GATEWAY_EVAL_KEY before this syncs.
+    gateway-luna-eval:
+      model: openai/gpt-luna
+      api_base: http://192.168.0.21:4000/v1
+      api_key: envRef:LLM_GATEWAY_EVAL_KEY
 
   toolsets:
     prometheus/metrics:

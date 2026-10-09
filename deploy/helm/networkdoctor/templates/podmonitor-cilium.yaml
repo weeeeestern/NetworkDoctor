@@ -1,0 +1,55 @@
+{{- /*
+Cilium metrics (Cilium CNI only). PodMonitors select the cilium-agent pods
+directly, so collection does not depend on the optional Services and
+ServiceMonitors that a Cilium install may or may not create (or may point at
+the wrong port, e.g. the Envoy proxy on :9964).
+
+Cilium itself must expose the metrics (its own Helm values):
+  prometheus.enabled=true            agent metrics, container port "prometheus" (:9962), cilium_*
+  hubble.metrics.enabled=[drop, ...] Hubble metrics, container port "hubble-metrics" (:9965), hubble_*
+An endpoint whose port is not exposed simply has no targets; nothing breaks.
+
+cilium-agent runs with hostNetwork, so instance=<node IP>:<port>, which is
+what the rules join on (kube_node_info.internal_ip).
+*/}}
+{{- $c := .Values.cilium }}
+{{- /* On by default wherever ServiceMonitors are (Prometheus Operator present).
+On a non-Cilium cluster no pod matches the selector: zero targets, no harm. */}}
+{{- if and $c.enabled .Values.serviceMonitor.enabled (or $c.agent.enabled $c.hubble.enabled) }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "networkdoctor.fullname" . }}-cilium
+  namespace: {{ .Values.serviceMonitor.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "networkdoctor.labels" . | nindent 4 }}
+    {{- with ($c.labels | default .Values.serviceMonitor.labels) }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ $c.namespace | quote }}
+  selector:
+    matchLabels:
+      {{- toYaml $c.podSelector | nindent 6 }}
+  podMetricsEndpoints:
+    {{- if $c.agent.enabled }}
+    - port: {{ $c.agent.port | quote }}
+      path: /metrics
+      interval: {{ $c.interval }}
+      scrapeTimeout: {{ $c.scrapeTimeout }}
+      relabelings:
+        - action: replace
+          sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+    {{- end }}
+    {{- if $c.hubble.enabled }}
+    # No node label here on purpose: the rules attach `node` to hubble_* by
+    # joining instance with kube_node_info, as with any Hubble scrape.
+    - port: {{ $c.hubble.port | quote }}
+      path: /metrics
+      interval: {{ $c.interval }}
+      scrapeTimeout: {{ $c.scrapeTimeout }}
+    {{- end }}
+{{- end }}

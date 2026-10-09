@@ -45,3 +45,7 @@ general_settings:
   database_url: os.environ/DATABASE_URL
   # Keep the admin UI and key management on, but only reachable on the LAN.
   # (The VM has no public interface; nothing here is exposed to the internet.)
+  # The UI is also served on the tailnet (CP: tailscale serve --https=4000),
+  # so sign-in uses named admin users only, not the shared master key.
+  # Create an Admin internal user first, or the UI has no way in.
+  disable_env_credential_login: true

@@ -84,7 +84,8 @@ jobs:
             > /tmp/fallback.yaml
           grep -q 'kind: ServiceMonitor' /tmp/operator.yaml
           grep -q 'kind: PrometheusRule' /tmp/operator.yaml
-          [ "$(grep -c 'rule_id: rule-' /tmp/operator.yaml)" -eq 8 ]
+          # Rule 1-8 all present (Rule 1 has a second, cross-node alert, so count ids, not alerts)
+          [ "$(grep -oE 'rule_id: rule-[0-9]+' /tmp/operator.yaml | sort -u | wc -l)" -eq 8 ]
           grep -q 'kind: AlertmanagerConfig' /tmp/operator.yaml
           ! grep -q 'kind: AlertmanagerConfig' /tmp/default.yaml
           grep -q 'kind: ConfigMap' /tmp/fallback.yaml

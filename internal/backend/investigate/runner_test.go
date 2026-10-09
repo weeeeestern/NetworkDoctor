@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"networkdoctor-agent/internal/backend/alertmanager"
+	"networkdoctor-agent/internal/backend/check"
 	"networkdoctor-agent/internal/backend/evidence"
 	"networkdoctor-agent/internal/backend/holmes"
 	"networkdoctor-agent/internal/backend/incident"
@@ -321,5 +322,119 @@ func TestGroupIsInvestigatedOnceWithRelatedAlerts(t *testing.T) {
 	md := report.Markdown(m)
 	if !strings.Contains(md, "grouped into "+primary.IncidentID) {
 		t.Errorf("member report should point at the primary")
+	}
+}
+
+type fakeChecker struct{ calls atomic.Int32 }
+
+func (f *fakeChecker) Check(_ context.Context, in check.Input) (check.Verdict, error) {
+	n := f.calls.Add(1)
+	if n == 1 {
+		return check.Verdict{Provider: "fake", Consistent: 0.1, SupportedStatus: "confirmed"}, nil
+	}
+	return check.Verdict{Provider: "fake", Consistent: 0.9, SupportedStatus: "confirmed"}, nil
+}
+
+func TestEvalRunDerivedJevRechecksOnceAndLeavesIncidentAlone(t *testing.T) {
+	var asks atomic.Int32
+	var lastAsk atomic.Value
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asks.Add(1)
+		var req map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		lastAsk.Store(req["ask"])
+		json.NewEncoder(w).Encode(map[string]any{"analysis": holmesAnswer, "tool_calls": []any{1, 2}})
+	}))
+	defer hs.Close()
+	store, _ := incident.NewFileStore(t.TempDir())
+	inc := newIncident(t, store, "rule-1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	fc := &fakeChecker{}
+	r := investigate.New(ctx, investigate.Options{
+		Store: store, Holmes: holmes.New(hs.URL, "", time.Second), Checker: fc, EvalDir: t.TempDir(),
+	})
+
+	id, err := r.StartEval(inc.IncidentID, "derived+jev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var run investigate.EvalRun
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		b, err := r.EvalResult(id)
+		if err == nil && json.Unmarshal(b, &run) == nil && (run.Status == "done" || run.Status == "failed") {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	o := run.Outcome
+	if run.Status != "done" || o == nil || !o.Rechecked || o.HolmesCalls != 2 || len(o.Checks) != 2 || o.ToolCalls != 4 {
+		t.Fatalf("run=%+v outcome=%+v", run, o)
+	}
+	if s, _ := lastAsk.Load().(string); !strings.Contains(s, "independent checker found your previous conclusion inconsistent") {
+		t.Fatalf("second ask lacks feedback: %.200s", s)
+	}
+	got, _ := store.Get(inc.IncidentID)
+	if got.HolmesStatus != "" || got.HolmesAttempts != 0 {
+		t.Fatalf("eval changed the incident: status=%q attempts=%d", got.HolmesStatus, got.HolmesAttempts)
+	}
+	if _, err := r.StartEval(inc.IncidentID, "bogus"); err == nil {
+		t.Fatal("want error for unknown arch")
+	}
+}
+
+func TestOutcomeRecordsDuration(t *testing.T) {
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(20 * time.Millisecond)
+		json.NewEncoder(w).Encode(map[string]any{"analysis": holmesAnswer})
+	}))
+	defer hs.Close()
+	store, _ := incident.NewFileStore(t.TempDir())
+	inc := newIncident(t, store, "rule-1")
+	r := investigate.New(context.Background(), investigate.Options{Store: store, Holmes: holmes.New(hs.URL, "", time.Second)})
+	if o := r.Investigate(context.Background(), inc, nil, investigate.ArchBaseline); o.DurationMS < 20 {
+		t.Fatalf("duration_ms=%d", o.DurationMS)
+	}
+}
+
+func TestEvalRunUsesEvalModelWhenSet(t *testing.T) {
+	models := make(chan string, 4)
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		models <- req["model"]
+		json.NewEncoder(w).Encode(map[string]any{"analysis": holmesAnswer})
+	}))
+	defer hs.Close()
+	store, _ := incident.NewFileStore(t.TempDir())
+	inc := newIncident(t, store, "rule-1")
+	r := investigate.New(context.Background(), investigate.Options{
+		Store: store, EvalDir: t.TempDir(),
+		Holmes: holmes.New(hs.URL, "gateway-luna", time.Second), Model: "gateway-luna",
+		EvalHolmes: holmes.New(hs.URL, "gateway-luna-eval", time.Second), EvalModel: "gateway-luna-eval",
+	})
+
+	if o := r.Investigate(context.Background(), inc, nil, investigate.ArchBaseline); o.Model != "gateway-luna" {
+		t.Fatalf("automatic outcome model=%q", o.Model)
+	}
+	id, err := r.StartEval(inc.IncidentID, "baseline")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var run investigate.EvalRun
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		b, err := r.EvalResult(id)
+		if err == nil && json.Unmarshal(b, &run) == nil && (run.Status == "done" || run.Status == "failed") {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if run.Status != "done" || run.Outcome.Model != "gateway-luna-eval" {
+		t.Fatalf("run=%+v", run)
+	}
+	if a, b := <-models, <-models; a != "gateway-luna" || b != "gateway-luna-eval" {
+		t.Fatalf("holmes saw models %q then %q", a, b)
 	}
 }

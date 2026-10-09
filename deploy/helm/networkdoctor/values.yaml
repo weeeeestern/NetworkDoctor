@@ -135,6 +135,38 @@ serviceMonitor:
   metricRelabelings: []
 
 # ---------------------------------------------------------------------------
+# Cilium metrics (only when the cluster's CNI is Cilium)
+# ---------------------------------------------------------------------------
+# PodMonitors on the cilium-agent pods, so collection does not depend on the
+# Services/ServiceMonitors a Cilium install may or may not create. Needs the
+# PodMonitor CRD (Prometheus Operator) and a Prometheus whose
+# podMonitorSelector matches `labels` (default: serviceMonitor.labels).
+#
+# Cilium must expose the metrics itself (Cilium Helm values):
+#   prometheus.enabled: true              -> agent metrics :9962 (cilium_*)
+#   hubble.metrics.enabled: [drop, ...]   -> Hubble metrics :9965 (hubble_*)
+# Rule 8 (NetworkPolicy drops) and the CT-map part of Rule 3 need Hubble
+# "drop"; Rules 1-7 work without Cilium.
+#
+# On by default, but only rendered when serviceMonitor.enabled is true (the
+# Prometheus Operator is there). On a cluster without Cilium no pod matches
+# podSelector, so the PodMonitor has zero targets and does nothing.
+cilium:
+  enabled: true
+  namespace: kube-system
+  podSelector:
+    k8s-app: cilium
+  labels: {}
+  interval: 30s
+  scrapeTimeout: 10s
+  agent:
+    enabled: true
+    port: prometheus
+  hubble:
+    enabled: true
+    port: hubble-metrics
+
+# ---------------------------------------------------------------------------
 # Detection layer: Prometheus alert rules (smoke-test set)
 # ---------------------------------------------------------------------------
 # The rule content lives in rules/networkdoctor-smoke-rules.yaml inside the
@@ -213,6 +245,9 @@ backend:
     holmesURL: ""
     # Holmes modelList name; empty = Holmes default (its MODEL env).
     holmesModel: ""
+    # Holmes modelList name for POST /eval/runs; empty = holmesModel. Point it
+    # at an entry with its own gateway key to bill evaluations separately.
+    evalHolmesModel: ""
     holmesTimeout: 10m
     # Investigate new firing incidents automatically (once per incident).
     holmesAuto: "true"
@@ -230,6 +265,22 @@ backend:
     # Evidence and investigation window: startsAt +/- this.
     evidenceWindow: 15m
     maxBodyBytes: "4194304"
+    # Investigation architecture for automatic runs (see eval/README.md):
+    #   baseline     evidence snapshot + Holmes
+    #   derived      + deterministic scenario facts (per-pod ratios, onset
+    #                timing, kernel limit changes) computed by the backend
+    #   derived+jev  + a Jev consistency check of the conclusion and one
+    #                re-examination when it fails (needs backend.jev)
+    # POST /eval/runs can run any architecture on demand regardless.
+    arch: baseline
+  # Jev (TypeSafe System One) conclusion checker for derived+jev. SaaS:
+  # api.typesafe.ai must be reachable, so not for air-gapped clusters. The
+  # key is read from a Secret you create; the pod starts without it.
+  jev:
+    enabled: false
+    secretName: jev-api
+    secretKey: JEV_API_KEY
+    model: jev-latest
   extraEnv: []
 
   persistence:

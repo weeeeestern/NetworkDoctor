@@ -80,6 +80,13 @@ func (c *Client) Ask(ctx context.Context, ask string) (Answer, error) {
 // is given: routing is the skills' job (their descriptions start with the
 // rule_id/scenario label values).
 func BuildAsk(inc *incident.Incident, related []*incident.Incident, windowStart, windowEnd time.Time) string {
+	return BuildAskWithFacts(inc, related, windowStart, windowEnd, nil)
+}
+
+// BuildAskWithFacts is BuildAsk plus deterministic facts computed by the
+// backend ("derived" architecture). They are listed separately from the raw
+// evidence because they already apply the skills' thresholds.
+func BuildAskWithFacts(inc *incident.Incident, related []*incident.Incident, windowStart, windowEnd time.Time, derived []incident.Evidence) string {
 	var b strings.Builder
 	b.WriteString("A NetworkDoctor alert fired. Investigate the root cause with the matching NetworkDoctor skill, ")
 	b.WriteString("Prometheus and read-only Kubernetes tools.\n")
@@ -117,6 +124,15 @@ func BuildAsk(inc *incident.Incident, related []*incident.Incident, windowStart,
 		b.WriteString("\nevidence already collected by NetworkDoctor over the window (verify, do not trust blindly):\n")
 		for _, e := range inc.EvidenceMetrics {
 			fmt.Fprintf(&b, "- %s: %s\n  query: %s\n", e.Metric, e.Observation, e.Query)
+		}
+	}
+	if len(derived) > 0 {
+		b.WriteString("\nderived facts computed deterministically by NetworkDoctor from Prometheus over the window. ")
+		b.WriteString("They are measurements, not guesses: use them as primary evidence, cite them in supporting_evidence, ")
+		b.WriteString("and if your conclusion disagrees with one, show with tool output why it does not apply. ")
+		b.WriteString("'unavailable' means the data was missing, not that the value was normal:\n")
+		for _, e := range derived {
+			fmt.Fprintf(&b, "- %s: %s\n  query: %s\n", strings.TrimPrefix(e.Metric, "derived:"), e.Observation, e.Query)
 		}
 	}
 	return b.String()

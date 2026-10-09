@@ -71,6 +71,34 @@ Swapping LiteLLM for another gateway later changes those three values and
 nothing else. Comparing models is a one-line change of `model`
 (`openai/claude-sonnet` vs `openai/gpt-luna`); both sit behind the same key.
 
+### Evaluation key
+
+Evaluation runs (`POST /eval/runs`) use their own key so the gateway reports
+their spend apart from automatic RCA. Same request with
+`"key_alias":"holmesgpt-eval"`, then add it to the existing Secret as
+`LLM_GATEWAY_EVAL_KEY` **before** syncing Holmes (its `gateway-luna-eval`
+model entry reads that variable):
+
+```bash
+kubectl -n holmesgpt patch secret holmes-llm --type merge \
+  -p "{\"stringData\":{\"LLM_GATEWAY_EVAL_KEY\":\"$EVAL_KEY\"}}"
+kubectl -n holmesgpt rollout restart deploy/holmesgpt-holmes
+```
+
+Spend per key: Admin UI (`/ui`) or
+`select metadata->>'user_api_key_alias', sum(spend) from "LiteLLM_SpendLogs" group by 1;`
+
+## Admin UI
+
+Tailnet only: https://<control-plane>.<tailnet>.ts.net:4000/ui
+(on the CP: `tailscale serve --bg --https=4000 http://192.168.0.21:4000`;
+off: `tailscale serve --https=4000 off`).
+
+Sign-in is by named Admin users (Internal Users → Invite, role Admin).
+`disable_env_credential_login: true` in config.yaml turns off the shared
+master-key login, so create an Admin user before deploying that line.
+The master key still works for the API (`/key/generate`).
+
 ## Operations
 
 ```bash

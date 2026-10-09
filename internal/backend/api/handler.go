@@ -8,6 +8,8 @@
 //	GET  /incidents/{id}
 //	GET  /incidents/{id}/report.md
 //	POST /incidents/{id}/holmes   (manual re-investigation)
+//	POST /eval/runs               (re-investigate with an architecture, no state change)
+//	GET  /eval/runs/{run}
 //	GET  /                        (embedded incident dashboard)
 package api
 
@@ -28,6 +30,13 @@ import (
 // Investigator schedules background investigations. nil disables them.
 type Investigator interface {
 	Enqueue(id string, force bool) error
+}
+
+// Evaluator runs evaluation investigations (optional; implemented by the
+// investigate.Runner).
+type Evaluator interface {
+	StartEval(incidentID, arch string) (string, error)
+	EvalResult(runID string) ([]byte, error)
 }
 
 // Options configures the handler.
@@ -89,10 +98,62 @@ func New(opts Options) http.Handler {
 	mux.HandleFunc("GET /incidents/{id}", h.getIncident)
 	mux.HandleFunc("GET /incidents/{id}/report.md", h.reportMarkdown)
 	mux.HandleFunc("POST /incidents/{id}/holmes", h.holmesRetry)
+	mux.HandleFunc("POST /eval/runs", h.evalStart)
+	mux.HandleFunc("GET /eval/runs/{run}", h.evalGet)
 	// Dashboard: "GET /" only matches paths no API route claims, so the UI
 	// and its assets live at the root without shadowing the endpoints above.
 	mux.Handle("GET /", webui.Handler())
 	return mux
+}
+
+type evalRequest struct {
+	IncidentID string `json:"incident_id"`
+	Arch       string `json:"arch"`
+}
+
+func (h *handler) evaluator() (Evaluator, bool) {
+	e, ok := h.inv.(Evaluator)
+	return e, ok && h.inv != nil
+}
+
+// evalStart re-investigates an existing incident with the requested
+// architecture. It returns 202 with a run id; poll GET /eval/runs/{run}.
+func (h *handler) evalStart(w http.ResponseWriter, r *http.Request) {
+	ev, ok := h.evaluator()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "investigations are not configured")
+		return
+	}
+	var req evalRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil || req.IncidentID == "" {
+		writeError(w, http.StatusBadRequest, `body must be {"incident_id": "...", "arch": "baseline|derived|derived+jev"}`)
+		return
+	}
+	id, err := ev.StartEval(req.IncidentID, req.Arch)
+	switch {
+	case errors.Is(err, incident.ErrNotFound):
+		writeError(w, http.StatusNotFound, "incident not found")
+		return
+	case err != nil:
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"run_id": id, "incident_id": req.IncidentID, "arch": req.Arch})
+}
+
+func (h *handler) evalGet(w http.ResponseWriter, r *http.Request) {
+	ev, ok := h.evaluator()
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "investigations are not configured")
+		return
+	}
+	b, err := ev.EvalResult(r.PathValue("run"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "run not found")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(b)
 }
 
 func (h *handler) healthz(w http.ResponseWriter, _ *http.Request) {

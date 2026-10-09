@@ -20,8 +20,10 @@ import (
 	"time"
 
 	"networkdoctor-agent/internal/backend/api"
+	"networkdoctor-agent/internal/backend/check"
 	"networkdoctor-agent/internal/backend/config"
 	"networkdoctor-agent/internal/backend/evidence"
+	"networkdoctor-agent/internal/backend/features"
 	"networkdoctor-agent/internal/backend/holmes"
 	"networkdoctor-agent/internal/backend/incident"
 	"networkdoctor-agent/internal/backend/investigate"
@@ -51,9 +53,15 @@ func main() {
 	}
 
 	// Evidence + Holmes are optional: each is enabled by its URL.
+	arch, err := investigate.ParseArch(cfg.Arch)
+	if err != nil {
+		logger.Fatalf("ND_ARCH: %v", err)
+	}
 	var inv api.Investigator
 	if cfg.HolmesURL != "" || cfg.PrometheusURL != "" {
 		opts := investigate.Options{
+			Arch:         arch,
+			EvalDir:      cfg.EvalDir,
 			Store:        store,
 			Model:        cfg.HolmesModel,
 			Window:       cfg.EvidenceWindow,
@@ -64,10 +72,22 @@ func main() {
 			Logger:       logger,
 		}
 		if cfg.PrometheusURL != "" {
-			opts.Evidence = &evidence.Collector{Prom: prometheus.New(cfg.PrometheusURL)}
+			prom := prometheus.New(cfg.PrometheusURL)
+			opts.Evidence = &evidence.Collector{Prom: prom}
+			opts.Deriver = &features.Deriver{Prom: prom}
+		}
+		// A typed nil *check.Jev must not become a non-nil interface.
+		if j := check.NewJev(cfg.JevURL, cfg.JevModel, cfg.JevAPIKey); j != nil {
+			opts.Checker = j
+		} else if arch == investigate.ArchDerivedJev {
+			logger.Printf("ND_ARCH=derived+jev but JEV_API_KEY is unset: the check step is skipped")
 		}
 		if cfg.HolmesURL != "" {
 			opts.Holmes = holmes.New(cfg.HolmesURL, cfg.HolmesModel, cfg.HolmesTimeout)
+			if cfg.EvalHolmesModel != "" {
+				opts.EvalHolmes = holmes.New(cfg.HolmesURL, cfg.EvalHolmesModel, cfg.HolmesTimeout)
+				opts.EvalModel = cfg.EvalHolmesModel
+			}
 		}
 		inv = investigate.New(ctx, opts)
 	}
@@ -91,8 +111,9 @@ func main() {
 
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Printf("listening on %s (data-dir=%s cluster=%s prometheus=%q holmes=%q model=%q auto=%t skip=%q)",
-			cfg.Listen, cfg.DataDir, cfg.ClusterName, cfg.PrometheusURL, cfg.HolmesURL, cfg.HolmesModel, cfg.HolmesAuto, cfg.HolmesSkipRulePrefixes)
+		logger.Printf("listening on %s (data-dir=%s eval-dir=%s cluster=%s prometheus=%q holmes=%q model=%q eval-model=%q arch=%s jev=%t auto=%t skip=%q)",
+			cfg.Listen, cfg.DataDir, cfg.EvalDir, cfg.ClusterName, cfg.PrometheusURL, cfg.HolmesURL, cfg.HolmesModel, cfg.EvalHolmesModel, arch,
+			cfg.JevAPIKey != "", cfg.HolmesAuto, cfg.HolmesSkipRulePrefixes)
 		errCh <- srv.ListenAndServe()
 	}()
 

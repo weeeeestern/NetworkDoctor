@@ -29,6 +29,12 @@ prometheusRule:
   enabled: true
   labels:
     release: prometheus-stack
+# CNI is Cilium 1.19; the chart's Cilium PodMonitor is on by default with
+# serviceMonitor.enabled. Hubble metrics (:9965) are exposed; agent metrics
+# (:9962) are not until Cilium runs with prometheus.enabled=true, and until
+# then the agent endpoint just has no targets. The hand-made ServiceMonitors
+# monitoring/cilium-agent (pointed at Envoy :9964) and monitoring/hubble are
+# replaced by it and can be deleted.
 ruleConfigMap:
   enabled: false
 
@@ -43,15 +49,25 @@ backend:
   image:
     # Pinned per commit. CI (backend-image.yml) rewrites this line after it
     # pushes a new image, so Argo CD only goes OutOfSync once the image exists.
-    tag: main-76d2ee9  # ci: backend-image
+    tag: main-7059a81  # ci: backend-image
     pullPolicy: IfNotPresent
   config:
     prometheusURL: http://prometheus-stack-kube-prom-prometheus.monitoring.svc:9090
     # HolmesGPT child app (deploy/helm/holmesgpt), Service holmesgpt-holmes:80.
     holmesURL: http://holmesgpt-holmes.holmesgpt.svc:80
     holmesModel: gateway-luna
+    # Same model on the eval virtual key (holmesgpt-eval) so gateway spend
+    # splits into automatic vs evaluation.
+    evalHolmesModel: gateway-luna-eval
     # Rule 1-8 scenario rules exist (rules/networkdoctor-scenario-rules.yaml),
     # so smoke alerts go back to pipeline-only: chart default "smoke-".
+    # Automatic investigations use derived facts (2026-10-07: 47% -> 79% on
+    # the scenarios with facts, no change elsewhere). eval/run.py still picks
+    # any architecture per run through POST /eval/runs.
+    arch: derived
+  # The key Secret (jev-api) is optional: without it derived+jev is skipped.
+  jev:
+    enabled: true
   persistence:
     # Lab storage comes from the local-path-provisioner child app (default
     # StorageClass `local-path`). storageClass is left empty on purpose so the

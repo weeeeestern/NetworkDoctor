@@ -1,7 +1,7 @@
 ---
 name: network-congestion
 description: Use for NetworkDoctor alerts labeled rule_id=rule-1 or scenario=network-congestion. Investigate Network Doctor Rule 1 alerts for Kubernetes network congestion by correlating application p99 latency, TCP retransmits, TCP RTT, TCP cwnd, NIC traffic/drop, run queue latency, and Hubble flow evidence.
-last_updated: 2026-09-30
+last_updated: 2026-10-02
 ---
 
 ## Goal
@@ -56,6 +56,23 @@ The agent exports these names (checked in Prometheus on the on-prem lab, 2026-09
 - `hubble_*` and `cilium_*` series have **no `node` label**. They carry `instance` (the node IP and port) and `pod` (the Cilium agent pod). Map a node to its Cilium pod with Kubernetes first, then filter on `pod` or `instance`; filtering on `node` returns nothing.
 - There is no DNS timeout counter. `ebpf_dns_slow_total` counts responses slower than the agent threshold (default 50 ms) and is the closest proxy.
 - Convert µs histograms before comparing to seconds: `histogram_quantile(0.99, sum by (le, node) (rate(ebpf_runqlat_bucket[5m]))) / 1e6`.
+
+## Cross-node variant (`variant=cross-node`)
+
+Rule 1 has two alerts with the same `rule_id=rule-1`:
+
+- `NetworkDoctorNetworkCongestion` (severity warning): latency and TCP retransmits on the **same** node. Labels include `node`.
+- `NetworkDoctorNetworkCongestionCrossNode` (severity info, `variant=cross-node`): the service is slow on its own nodes while a **different** node, `retransmit_node`, retransmits. There is no `node` label; the alert is per service.
+
+For the cross-node variant, the first question is whether the two signals are connected at all. Absence of flow data is not evidence that they are unrelated.
+
+1. **Flow data, if available.** If Hubble tools (`hubble_observe_*`) are configured, look for flows from pods on `retransmit_node` to the service. Hubble Prometheus metrics in this setup carry no source or destination labels, so they cannot attribute flows; do not rely on them for linkage.
+2. **Timing.** Compare when the retransmit rate on `retransmit_node` rose with when the service p99 rose. Use short windows for this, `rate(...[1m])` with a 30s step; a 5m window smears onsets by several minutes and can make one signal look earlier than the other. Onsets within about 2 minutes of each other, and recovery at about the same time, support a link. Onsets more than 5 minutes apart argue against it. If both signals also rose and fell together earlier in the lookback window, that is a repeated episode and supports the link; it is not "already elevated".
+3. **Candidate clients.** With Kubernetes read tools, list pods running on `retransmit_node`. Pods in the service's namespace, pods whose spec, env or args reference the service name, and pods created shortly before the alert are candidate clients. Name them.
+4. **Decide.**
+   - Timing supports a link and a candidate client exists: treat it as client-side packet loss or congestion on `retransmit_node`, continue with the workflow below scoped to that node, `investigation_status: confirmed`, confidence `medium` at most.
+   - Evidence shows no link (timing contradicts it, or flow data shows no traffic from that node): `investigation_status: excluded` for congestion, and name the latency cause and the retransmit cause separately.
+   - The link can be neither shown nor ruled out: `investigation_status: inconclusive`, never `excluded`. Say exactly which data was missing.
 
 ## Workflow
 
