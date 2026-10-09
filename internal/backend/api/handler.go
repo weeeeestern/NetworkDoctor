@@ -10,6 +10,7 @@
 //	POST /incidents/{id}/holmes   (manual re-investigation)
 //	POST /eval/runs               (re-investigate with an architecture, no state change)
 //	GET  /eval/runs/{run}
+//	GET  /                        (embedded incident dashboard)
 package api
 
 import (
@@ -23,6 +24,7 @@ import (
 	"networkdoctor-agent/internal/backend/alertmanager"
 	"networkdoctor-agent/internal/backend/incident"
 	"networkdoctor-agent/internal/backend/report"
+	"networkdoctor-agent/internal/backend/webui"
 )
 
 // Investigator schedules background investigations. nil disables them.
@@ -98,6 +100,9 @@ func New(opts Options) http.Handler {
 	mux.HandleFunc("POST /incidents/{id}/holmes", h.holmesRetry)
 	mux.HandleFunc("POST /eval/runs", h.evalStart)
 	mux.HandleFunc("GET /eval/runs/{run}", h.evalGet)
+	// Dashboard: "GET /" only matches paths no API route claims, so the UI
+	// and its assets live at the root without shadowing the endpoints above.
+	mux.Handle("GET /", webui.Handler())
 	return mux
 }
 

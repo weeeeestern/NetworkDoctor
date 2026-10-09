@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NetworkDoctor · Incidents</title>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🩺</text></svg>" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">🩺</span>
+        <span class="brand-name">NetworkDoctor</span>
+      </div>
+      <nav>
+        <a class="nav-item active" href="#/">
+          <span class="nav-icon">⚠️</span> Incidents
+        </a>
+      </nav>
+      <div class="sidebar-foot" id="cluster-name"></div>
+    </aside>
+
+    <main class="main">
+      <div id="view"></div>
+    </main>
+  </div>
+
+  <!-- Off-screen container the PDF is rendered from -->
+  <div id="pdf-root" class="pdf-doc" aria-hidden="true"></div>
+
+  <script src="/vendor/marked.min.js"></script>
+  <script src="/vendor/html2pdf.bundle.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
