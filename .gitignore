@@ -12,3 +12,6 @@ internal/bpf/bpf_*.go
 
 # LLM gateway secrets (deploy/llm-gateway/.env)
 .env
+
+# experiment artifacts (local only)
+runs/
