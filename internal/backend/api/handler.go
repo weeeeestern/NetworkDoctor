@@ -256,6 +256,8 @@ type IncidentSummary struct {
 	AffectedNodes  []string   `json:"affected_nodes"`
 	DeliveryCount  int        `json:"delivery_count"`
 	HolmesStatus   string     `json:"holmes_status,omitempty"`
+	HolmesTokens   int        `json:"holmes_total_tokens,omitempty"`
+	HolmesCostUSD  float64    `json:"holmes_cost_usd,omitempty"`
 	CorrelationID  string     `json:"correlation_id,omitempty"`
 }
 
@@ -285,6 +287,8 @@ func (h *handler) listIncidents(w http.ResponseWriter, r *http.Request) {
 			AffectedNodes:  inc.AffectedNodes,
 			DeliveryCount:  inc.DeliveryCount,
 			HolmesStatus:   inc.HolmesStatus,
+			HolmesTokens:   inc.HolmesTotalTokens,
+			HolmesCostUSD:  inc.HolmesCostUSD,
 			CorrelationID:  inc.CorrelationID,
 		})
 	}
