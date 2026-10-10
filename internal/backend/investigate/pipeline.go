@@ -60,11 +60,11 @@ type Outcome struct {
 	HolmesCalls int                 `json:"holmes_calls"`
 	// Token usage summed over all Holmes calls of this run (0 when the
 	// Holmes response carries no usage metadata).
-	PromptTokens     int     `json:"prompt_tokens,omitempty"`
-	CompletionTokens int     `json:"completion_tokens,omitempty"`
-	TotalTokens      int     `json:"total_tokens,omitempty"`
-	CostUSD          float64 `json:"cost_usd,omitempty"`
-	Checks      []check.Verdict     `json:"checks,omitempty"`
+	PromptTokens     int             `json:"prompt_tokens,omitempty"`
+	CompletionTokens int             `json:"completion_tokens,omitempty"`
+	TotalTokens      int             `json:"total_tokens,omitempty"`
+	CostUSD          float64         `json:"cost_usd,omitempty"`
+	Checks           []check.Verdict `json:"checks,omitempty"`
 	// Rechecked is true when a failed check sent Holmes back once.
 	Rechecked  bool   `json:"rechecked,omitempty"`
 	CheckError string `json:"check_error,omitempty"`
