@@ -58,7 +58,13 @@ type Outcome struct {
 	Result      map[string]any      `json:"result,omitempty"`
 	ToolCalls   int                 `json:"tool_calls"`
 	HolmesCalls int                 `json:"holmes_calls"`
-	Checks      []check.Verdict     `json:"checks,omitempty"`
+	// Token usage summed over all Holmes calls of this run (0 when the
+	// Holmes response carries no usage metadata).
+	PromptTokens     int             `json:"prompt_tokens,omitempty"`
+	CompletionTokens int             `json:"completion_tokens,omitempty"`
+	TotalTokens      int             `json:"total_tokens,omitempty"`
+	CostUSD          float64         `json:"cost_usd,omitempty"`
+	Checks           []check.Verdict `json:"checks,omitempty"`
 	// Rechecked is true when a failed check sent Holmes back once.
 	Rechecked  bool   `json:"rechecked,omitempty"`
 	CheckError string `json:"check_error,omitempty"`
@@ -154,22 +160,31 @@ func (r *Runner) investigate(ctx context.Context, inc *incident.Incident, relate
 	return out
 }
 
+// addUsage accumulates one answer's tool calls and token usage.
+func (o *Outcome) addUsage(ans holmes.Answer) {
+	o.ToolCalls += ans.ToolCalls
+	o.PromptTokens += ans.PromptTokens
+	o.CompletionTokens += ans.CompletionTokens
+	o.TotalTokens += ans.TotalTokens
+	o.CostUSD += ans.CostUSD
+}
+
 // askParsed asks Holmes and, if the answer has no result block, asks once
-// more. Tool calls and Holmes calls accumulate on out.
+// more. Tool calls, token usage and Holmes calls accumulate on out.
 func (r *Runner) askParsed(ctx context.Context, h Asker, ask string, out *Outcome) (holmes.Answer, map[string]any, error) {
 	ans, err := h.Ask(ctx, ask)
 	out.HolmesCalls++
 	if err != nil {
 		return holmes.Answer{}, nil, err
 	}
-	out.ToolCalls += ans.ToolCalls
+	out.addUsage(ans)
 	result, perr := holmes.ParseResult(ans.Analysis)
 	if perr != nil {
 		r.o.Logger.Printf("answer not parseable (%v, %d tool calls); asking once more", perr, ans.ToolCalls)
 		ans2, err2 := h.Ask(ctx, holmes.RetryAsk(ask, ans.Analysis))
 		out.HolmesCalls++
 		if err2 == nil {
-			out.ToolCalls += ans2.ToolCalls
+			out.addUsage(ans2)
 			ans = ans2
 			result, perr = holmes.ParseResult(ans.Analysis)
 		}

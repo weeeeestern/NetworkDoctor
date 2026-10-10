@@ -137,8 +137,8 @@ func TestNodeLocalizedRefusalsAndCandidatePod(t *testing.T) {
 			ser(map[string]string{"node": "worker01-x"}, 0.01, 0.02, 0.01, 0.01),
 		},
 		"sum by (node) (rate(ebpf_tcp_connect_failed_total[1m]))": {ser(map[string]string{"node": "worker02-x"}, 0, 7.5, 7.6, 0)},
-		"ebpf_tcp_retransmits_total": {ser(map[string]string{"node": "worker02-x"}, 0, 0.01, 0, 0)},
-		"kube_pod_created":           {ser(map[string]string{"namespace": "demo", "pod": "nd-r6-client"}, created)},
+		"ebpf_tcp_retransmits_total":                              {ser(map[string]string{"node": "worker02-x"}, 0, 0.01, 0, 0)},
+		"kube_pod_created":                                        {ser(map[string]string{"namespace": "demo", "pod": "nd-r6-client"}, created)},
 	}
 	inc := &incident.Incident{Scenario: "node-localized-failure", StartsAt: t0.Add(5 * time.Minute),
 		AlertLabels: map[string]string{"node": "worker02-x"}}

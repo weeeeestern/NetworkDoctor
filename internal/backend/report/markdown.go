@@ -84,6 +84,13 @@ func holmesLine(inc *incident.Incident) string {
 	if inc.HolmesToolCalls > 0 {
 		s += fmt.Sprintf(" · %d tool calls", inc.HolmesToolCalls)
 	}
+	if inc.HolmesTotalTokens > 0 {
+		s += fmt.Sprintf(" · %d tokens (%d in / %d out)",
+			inc.HolmesTotalTokens, inc.HolmesPromptTokens, inc.HolmesCompletionTokens)
+	}
+	if inc.HolmesCostUSD > 0 {
+		s += fmt.Sprintf(" · $%.4f", inc.HolmesCostUSD)
+	}
 	return s
 }
 
