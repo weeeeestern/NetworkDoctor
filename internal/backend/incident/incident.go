@@ -69,6 +69,12 @@ type Incident struct {
 	// HolmesToolCalls is how many tool calls Holmes made; a cheap signal of
 	// how hard it had to look.
 	HolmesToolCalls int `json:"holmes_tool_calls,omitempty"`
+	// Token usage and cost of the investigation, summed over its Holmes
+	// calls. Zero when the Holmes response had no usage metadata.
+	HolmesPromptTokens     int     `json:"holmes_prompt_tokens,omitempty"`
+	HolmesCompletionTokens int     `json:"holmes_completion_tokens,omitempty"`
+	HolmesTotalTokens      int     `json:"holmes_total_tokens,omitempty"`
+	HolmesCostUSD          float64 `json:"holmes_cost_usd,omitempty"`
 	// HolmesArch is the investigation architecture used: baseline, derived
 	// or derived+jev (see internal/backend/investigate).
 	HolmesArch string `json:"holmes_arch,omitempty"`

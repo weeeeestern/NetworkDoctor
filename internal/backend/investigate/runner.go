@@ -212,7 +212,11 @@ func (r *Runner) run(ctx context.Context, j job) {
 	if err != nil {
 		r.o.Logger.Printf("investigate %s: save evidence: %v", j.id, err)
 	}
-	r.finish(j.id, o.Status, o.Error, holmes.Answer{Analysis: o.Analysis, ToolCalls: o.ToolCalls}, o.Result)
+	r.finish(j.id, o.Status, o.Error, holmes.Answer{
+		Analysis: o.Analysis, ToolCalls: o.ToolCalls,
+		PromptTokens: o.PromptTokens, CompletionTokens: o.CompletionTokens,
+		TotalTokens: o.TotalTokens, CostUSD: o.CostUSD,
+	}, o.Result)
 	r.o.Logger.Printf("investigate %s: %s holmes %s in %s (%d tool calls, %d holmes calls)",
 		j.id, o.Arch, o.Status, time.Duration(o.DurationMS)*time.Millisecond, o.ToolCalls, o.HolmesCalls)
 }
@@ -238,6 +242,10 @@ func (r *Runner) finish(id, status, msg string, ans holmes.Answer, result map[st
 		i.HolmesError = msg
 		i.HolmesAnalysis = ans.Analysis
 		i.HolmesToolCalls = ans.ToolCalls
+		i.HolmesPromptTokens = ans.PromptTokens
+		i.HolmesCompletionTokens = ans.CompletionTokens
+		i.HolmesTotalTokens = ans.TotalTokens
+		i.HolmesCostUSD = ans.CostUSD
 		i.UpdatedAt = r.o.Now().UTC()
 		if result != nil {
 			i.HolmesResult = result

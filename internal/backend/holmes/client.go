@@ -36,10 +36,15 @@ func New(baseURL, model string, timeout time.Duration) *Client {
 	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), Model: model, HTTP: &http.Client{Timeout: timeout}}
 }
 
-// Answer is the useful part of an /api/chat response.
+// Answer is the useful part of an /api/chat response. Token counts and cost
+// come from response metadata (usage/costs); zero when Holmes omits them.
 type Answer struct {
-	Analysis  string
-	ToolCalls int
+	Analysis         string
+	ToolCalls        int
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+	CostUSD          float64
 }
 
 type chatRequest struct {
@@ -50,6 +55,7 @@ type chatRequest struct {
 type chatResponse struct {
 	Analysis  string            `json:"analysis"`
 	ToolCalls []json.RawMessage `json:"tool_calls"`
+	Metadata  map[string]any    `json:"metadata"`
 }
 
 // Ask sends one investigation request.
@@ -73,7 +79,21 @@ func (c *Client) Ask(ctx context.Context, ask string) (Answer, error) {
 	if err := json.Unmarshal(raw, &cr); err != nil {
 		return Answer{}, fmt.Errorf("decode holmes response: %w", err)
 	}
-	return Answer{Analysis: cr.Analysis, ToolCalls: len(cr.ToolCalls)}, nil
+	a := Answer{Analysis: cr.Analysis, ToolCalls: len(cr.ToolCalls)}
+	if u, ok := cr.Metadata["usage"].(map[string]any); ok {
+		a.PromptTokens = intField(u, "prompt_tokens")
+		a.CompletionTokens = intField(u, "completion_tokens")
+		a.TotalTokens = intField(u, "total_tokens")
+	}
+	if c, ok := cr.Metadata["costs"].(map[string]any); ok {
+		a.CostUSD, _ = c["total_cost"].(float64)
+	}
+	return a, nil
+}
+
+func intField(m map[string]any, key string) int {
+	f, _ := m[key].(float64) // encoding/json decodes numbers as float64
+	return int(f)
 }
 
 // BuildAsk renders the investigation request from an incident. No skill name
