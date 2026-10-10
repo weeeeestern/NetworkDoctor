@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- NetworkDoctor logo concept 4: "shield pulse"
+       A shield (the network kept healthy) with a heartbeat across it. -->
+  <rect width="128" height="128" rx="30" fill="#3f6df5"/>
+  <path d="M64 18 100 32v28c0 24-15 38-36 48-21-10-36-24-36-48V32Z"
+        fill="none" stroke="#ffffff" stroke-width="7" stroke-linejoin="round"/>
+  <path d="M40 64h10l6-13 10 28 7-19 4 4h11"
+        fill="none" stroke="#ffffff" stroke-width="6"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

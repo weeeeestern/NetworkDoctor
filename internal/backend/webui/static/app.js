@@ -52,6 +52,9 @@
     return badge(st, cls);
   };
 
+  const fmtTok = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+  const fmtCost = (v) => `$${v >= 0.1 ? v.toFixed(2) : v.toFixed(3)}`;
+
   const getJSON = async (url) => {
     const res = await fetch(url);
     const body = await res.json().catch(() => ({}));
@@ -129,9 +132,9 @@
       </div>`).join('');
   }
 
-  const cardHead = (icon, title, sub) => `
+  const cardHead = (title, sub) => `
     <div class="card-head">
-      <div class="card-title-row"><span class="icon-chip">${icon}</span><h2 class="card-title">${esc(title)}</h2></div>
+      <h2 class="card-title">${esc(title)}</h2>
       ${sub ? `<span class="page-sub">${sub}</span>` : ''}
     </div>`;
 
@@ -175,7 +178,10 @@
           <div>${esc(i.symptom_summary || '-')}</div>
           <div class="cell-sub">${esc((i.affected_nodes || []).join(', '))}</div>
         </td>
-        <td>${holmesBadge(i.holmes_status)}</td>
+        <td>
+          ${holmesBadge(i.holmes_status)}
+          ${i.holmes_total_tokens ? `<div class="cell-sub">${fmtTok(i.holmes_total_tokens)} tok${i.holmes_cost_usd ? ` · ${fmtCost(i.holmes_cost_usd)}` : ''}</div>` : ''}
+        </td>
         <td>
           <div>${fmtTime(i.starts_at)}</div>
           <div class="cell-sub">${ago(i.starts_at)}</div>
@@ -212,7 +218,7 @@
 
       <div class="dash-grid">
         <div class="card chart-card">
-          ${cardHead('📊', 'Incidents over time', 'last 7 days')}
+          ${cardHead('Incidents over time', 'last 7 days')}
           <div class="chart-body">
             ${barChart(incidents)}
             <div class="legend legend-row">
@@ -222,7 +228,7 @@
           </div>
         </div>
         <div class="card chart-card">
-          ${cardHead('🧭', 'By severity', '')}
+          ${cardHead('By severity', '')}
           <div class="chart-body donut-wrap">
             ${sevDonut.svg}
             <div class="legend">${sevDonut.legend}</div>
@@ -232,14 +238,14 @@
 
       <div class="dash-grid dash-grid-rev">
         <div class="card chart-card">
-          ${cardHead('🔎', 'Investigated', '')}
+          ${cardHead('Investigated', '')}
           <div class="chart-body kpi-body">
             <div class="kpi-value">${coverage}%</div>
             <div class="page-sub">${investigated} of ${incidents.length} incidents have a completed root-cause investigation</div>
           </div>
         </div>
         <div class="card chart-card">
-          ${cardHead('🖥️', 'Affected nodes', `top ${topNodes.length}`)}
+          ${cardHead('Affected nodes', `top ${topNodes.length}`)}
           <div class="chart-body">
             ${topNodes.length ? hbars(topNodes) : '<div class="page-sub">no node data</div>'}
           </div>
@@ -248,10 +254,10 @@
 
       <div class="card">
         <div class="card-head">
-          <div class="card-title-row"><span class="icon-chip">📋</span><h2 class="card-title">Incident list</h2></div>
+          <h2 class="card-title">Incident list</h2>
           <div class="tabs">${tabs}</div>
         </div>
-        ${filtered.length === 0 ? '<div class="empty">No incidents 🎉</div>' : `
+        ${filtered.length === 0 ? '<div class="empty">No incidents</div>' : `
         <table>
           <thead>
             <tr>
@@ -305,6 +311,16 @@
     return `<div class="section-sub">${esc(title)}</div><ul class="plain">${lis}</ul>`;
   };
 
+  // One labelled stat chip of the investigation summary row.
+  const rcStat = (label, value, cls = '', sub = '') => `
+    <div class="rc-stat">
+      <div class="k">${esc(label)}</div>
+      <div class="v ${cls}">${esc(value)}${sub ? ` <span class="sub">${esc(sub)}</span>` : ''}</div>
+    </div>`;
+
+  const confidenceCls = (c) =>
+    c === 'high' ? 'good' : c === 'medium' ? 'warn' : c === 'low' ? 'bad' : '';
+
   function rootCauseCard(inc) {
     const r = inc.holmes_result;
     if (!r) {
@@ -314,15 +330,18 @@
       return `<div class="card"><div class="card-head"><h2 class="card-title">Root cause</h2></div>
         <div class="card-body">${msg}</div></div>`;
     }
+    const st = r.investigation_status;
     return `
       <div class="card">
         <div class="card-head"><h2 class="card-title">Root cause</h2></div>
         <div class="card-body">
-          <div class="rc-status">
-            ${badge(r.investigation_status, r.investigation_status === 'confirmed' ? 'done' : 'neutral')}
-            ${r.confidence ? `<span class="page-sub">confidence: <b>${esc(r.confidence)}</b></span>` : ''}
-            ${inc.holmes_model ? `<span class="page-sub">· model ${esc(inc.holmes_model)}</span>` : ''}
-            ${inc.holmes_tool_calls ? `<span class="page-sub">· ${inc.holmes_tool_calls} tool calls</span>` : ''}
+          <div class="rc-stats">
+            ${st ? rcStat('status', st, st === 'confirmed' ? 'good' : st === 'excluded' ? 'warn' : '') : ''}
+            ${r.confidence ? rcStat('confidence', r.confidence, confidenceCls(r.confidence)) : ''}
+            ${inc.holmes_model ? rcStat('model', inc.holmes_model) : ''}
+            ${inc.holmes_tool_calls ? rcStat('tool calls', inc.holmes_tool_calls) : ''}
+            ${inc.holmes_total_tokens ? rcStat('tokens', fmtTok(inc.holmes_total_tokens), '', `${fmtTok(inc.holmes_prompt_tokens || 0)} in · ${fmtTok(inc.holmes_completion_tokens || 0)} out`) : ''}
+            ${inc.holmes_cost_usd ? rcStat('cost', fmtCost(inc.holmes_cost_usd)) : ''}
           </div>
           <div class="rc-text">${esc(String(r.root_cause || '').trim())}</div>
           ${holmesList('Trigger evidence', r.trigger_evidence)}
@@ -369,7 +388,7 @@
           </div>
         </div>
         <div class="btn-row">
-          <button class="btn primary" id="btn-pdf">⬇ Download PDF</button>
+          <button class="btn primary" id="btn-pdf">Download PDF</button>
           <a class="btn" href="/incidents/${encodeURIComponent(inc.incident_id)}/report.md" target="_blank">Markdown</a>
           <button class="btn" id="btn-holmes">Re-investigate</button>
         </div>
@@ -438,11 +457,14 @@
     }
   }
 
-  // Render the server-side Markdown report into a styled hidden element and
-  // print it to PDF. Keeps the PDF layout identical to report.md content.
+  // Render the server-side Markdown report into #pdf-root and print it to
+  // PDF. html2canvas needs the element genuinely visible (see style.css), so
+  // the opaque overlay hides the page while it is shown.
   async function downloadPDF(inc) {
     const btn = document.getElementById('btn-pdf');
     const flash = document.getElementById('flash');
+    const root = document.getElementById('pdf-root');
+    const overlay = document.getElementById('pdf-overlay');
     btn.disabled = true;
     const prev = btn.textContent;
     btn.textContent = 'Generating…';
@@ -451,8 +473,9 @@
       if (!res.ok) throw new Error(`failed to fetch report (${res.status})`);
       const md = await res.text();
 
-      const root = document.getElementById('pdf-root');
+      overlay.classList.add('show');
       root.innerHTML = marked.parse(md);
+      root.style.display = 'block';
 
       await html2pdf().set({
         margin: [12, 12, 14, 12],
@@ -462,10 +485,12 @@
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
       }).from(root).save();
-      root.innerHTML = '';
     } catch (err) {
       flash.innerHTML = `<div class="notice err">PDF generation failed: ${esc(err.message)}</div>`;
     } finally {
+      root.style.display = '';
+      root.innerHTML = '';
+      overlay.classList.remove('show');
       btn.disabled = false;
       btn.textContent = prev;
     }

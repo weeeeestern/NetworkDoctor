@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- NetworkDoctor logo concept 3: "stethoscope on a node"
+       A stethoscope listening to a network node (the small connected circle). -->
+  <rect width="128" height="128" rx="30" fill="#3f6df5"/>
+  <g fill="none" stroke="#ffffff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M38 26v24a18 18 0 0 0 36 0V26"/>
+    <path d="M56 68v14a22 22 0 0 0 44 0V66"/>
+  </g>
+  <circle cx="100" cy="54" r="12" fill="none" stroke="#ffffff" stroke-width="7"/>
+  <circle cx="100" cy="54" r="4" fill="#ffffff"/>
+  <g fill="#ffffff">
+    <circle cx="38" cy="24" r="6"/>
+    <circle cx="74" cy="24" r="6"/>
+  </g>
+</svg>
