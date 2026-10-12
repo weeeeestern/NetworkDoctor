@@ -6,14 +6,15 @@ NetworkDoctor는 Kubernetes 클러스터에서 발생하는 네트워크 장애�
 
 노드마다 붙인 eBPF 에이전트가 커널 네트워크 신호를 Prometheus 지표로 내보내고, Prometheus 룰이 8가지 장애 시나리오를 탐지합니다. 알림이 오면 backend가 인시던트를 만들고 근거 지표를 모은 뒤, HolmesGPT에게 시나리오별 스킬로 원인을 조사시켜 결과를 JSON과 Markdown 리포트로 남깁니다.
 
-## 현재 상태 (2026-10-06)
+## 현재 상태 (2026-10-12)
 
 | 영역 | 상태 |
 | --- | --- |
 | 탐지 | eBPF 에이전트 + Prometheus 룰 **Rule 1~8** 동작. 온프렘 랩(워커 3대)에서 8개 모두 실제 장애로 발화 확인 |
 | 인시던트 | Alertmanager 웹훅 → 멱등 저장(PVC) → 같은 노드·서비스 알림을 한 그룹으로 묶어 조사 1회 |
 | 원인 조사 | HolmesGPT + 시나리오 스킬 8종. 스킬은 알림 라벨을 보고 스스로 선택(backend가 이름을 지정하지 않음) |
-| LLM | 클러스터 밖 LiteLLM 게이트웨이 경유. 기본 모델 `gateway-luna`, 조사 1회 약 $0.04 |
+| LLM | 클러스터 밖 LiteLLM 게이트웨이 경유. 기본 모델 `gateway-luna`. 조사별 토큰·비용을 인시던트에 기록 |
+| UI | backend에 임베드된 인시던트 대시보드(`/`). 목록·차트·상세·재조사, 진단 리포트 **PDF 다운로드** |
 | 재현 | `scripts/repro/`로 Rule 1~8 장애를 자동 주입·복구하고 PASS/FAIL 판정 |
 | 정확도 | 계산을 코드가 맡는 구조 적용으로 해당 장애 원인 분석 정확도 47% → 79% (평가 하네스 `eval/`) |
 | 배포 | Helm 차트 3종 + Argo CD 앱-오브-앱(수동 Sync), 이미지는 커밋 SHA 태그로 고정 |
@@ -37,8 +38,9 @@ NetworkDoctor는 Kubernetes 클러스터에서 발생하는 네트워크 장애�
 │  ├─ 상관 그룹                      같은 노드(없으면 서비스) 10분 창, 그룹당 조사 1회
 │  ├─ 증거 수집                      eBPF PromQL 6종
 │  ├─ 파생 사실 (derived 구조)        CoreDNS 파드 비율 · 신호 시점차 · conntrack 한도 · 연결 실패 성격
-│  ├─ HolmesGPT 호출 → 공통 스키마 파싱 → report.md
-│  └─ POST /eval/runs               구조를 골라 재조사 (평가용, 인시던트 불변)
+│  ├─ HolmesGPT 호출 → 공통 스키마 파싱 → report.md (+ 토큰·비용 기록)
+│  ├─ POST /eval/runs               구조를 골라 재조사 (평가용, 인시던트 불변)
+│  └─ GET /                         임베드 대시보드 (목록·차트·상세·PDF 다운로드)
 │
 ├─ HolmesGPT (공식 차트 래핑)
 │  └─ skills/ 8종을 Git에서 받아 Prometheus·k8s 읽기 도구로 조사
@@ -87,11 +89,21 @@ incident
 ├─ derived_facts              derived 구조의 계산 결과
 ├─ root_cause_candidates, recommended_actions
 ├─ holmes_status / holmes_result / holmes_analysis / holmes_tool_calls / holmes_arch
+├─ holmes_prompt_tokens / holmes_completion_tokens / holmes_total_tokens / holmes_cost_usd
 ├─ correlation_id, correlated_incidents
 └─ recovery_status
 ```
 
-API: `GET /incidents`, `GET /incidents/{id}`, `GET /incidents/{id}/report.md`, `POST /incidents/{id}/holmes`(재조사), `POST /eval/runs`, `GET /eval/runs/{run}`.
+API: `GET /incidents`, `GET /incidents/{id}`, `GET /incidents/{id}/report.md`, `POST /incidents/{id}/holmes`(재조사), `POST /eval/runs`, `GET /eval/runs/{run}`. 그 외 경로는 임베드 대시보드(`GET /`)가 받습니다.
+
+## 대시보드 UI
+
+backend 바이너리에 `go:embed`로 내장된 웹 대시보드입니다(별도 빌드·배포 없음). backend 주소 루트(`/`)로 접속합니다.
+
+- **목록**: 최근 7일 발생 추이, severity 분포, 조사율, 노드별 발생 수 + 인시던트 테이블(10개/페이지, 상태 필터)
+- **상세**: 개요·근본 원인·증거·알림 라벨 카드, 조사 메타(status/confidence/model/tool calls/tokens/cost) 요약
+- **리포트**: `report.md`를 TL;DR → At a glance → What to do → Why 순서의 운영자용 구성으로 렌더하고, 버튼 한 번으로 **A4 PDF 다운로드**
+- 로고·수동 재조사(Re-investigate) 버튼 포함. 로고 원본은 `docs/logo/networkdoctor-logo.svg`
 
 ## 배포
 
@@ -120,8 +132,9 @@ API: `GET /incidents`, `GET /incidents/{id}`, `GET /incidents/{id}/report.md`, `
 │     ├─ evidence/ prometheus/                          # 기본 증거 수집
 │     ├─ features/                                      # 파생 사실 (derived)
 │     ├─ check/                                         # Jev 결론 검사 (derived+jev)
-│     ├─ holmes/                                        # Holmes 호출·결과 파싱
-│     └─ investigate/                                   # 조사 큐·상관·구조 3종·평가 실행
+│     ├─ holmes/                                        # Holmes 호출·결과 파싱 (+ 토큰·비용)
+│     ├─ investigate/                                   # 조사 큐·상관·구조 3종·평가 실행
+│     └─ webui/                                         # 임베드 대시보드 (go:embed 정적 파일)
 ├─ deploy/
 │  ├─ helm/networkdoctor/    # DaemonSet, ServiceMonitor, PrometheusRule(rules/), AlertmanagerConfig, backend
 │  ├─ helm/holmesgpt/        # HolmesGPT 공식 차트 래핑 + 스킬 로딩
