@@ -38,6 +38,13 @@ prometheusRule:
 ruleConfigMap:
   enabled: false
 
+# Grafana lives in the stack (ns monitoring); its dashboard sidecar defaults to
+# searchNamespace ALL, so ConfigMaps in the networkdoctor namespace are picked
+# up as-is. Dashboards land in the default folder unless the stack sets
+# grafana.sidecar.dashboards.folderAnnotation: grafana_folder.
+grafanaDashboards:
+  enabled: true
+
 # Alertmanager CR selector is {} (all AlertmanagerConfigs), so no labels needed.
 alertmanagerConfig:
   enabled: true
@@ -49,7 +56,7 @@ backend:
   image:
     # Pinned per commit. CI (backend-image.yml) rewrites this line after it
     # pushes a new image, so Argo CD only goes OutOfSync once the image exists.
-    tag: main-f76b3cb  # ci: backend-image
+    tag: main-7059a81  # ci: backend-image
     pullPolicy: IfNotPresent
   config:
     prometheusURL: http://prometheus-stack-kube-prom-prometheus.monitoring.svc:9090
