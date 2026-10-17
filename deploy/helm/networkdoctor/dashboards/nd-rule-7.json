@@ -658,7 +658,7 @@
   },
   {
    "type": "timeseries",
-   "title": "Kernel TCP failures / resets by node",
+   "title": "TCP connect failures / RSTs by node",
    "description": "",
    "datasource": {
     "type": "prometheus",
@@ -706,8 +706,8 @@
    },
    "targets": [
     {
-     "expr": "sum by (node) (rate(node_netstat_Tcp_AttemptFails[5m]) * on (instance) group_left (node) max by (instance, node) (label_replace(kube_node_info{node=~\"$node\"}, \"instance\", \"$1:9100\", \"internal_ip\", \"(.*)\")))",
-     "legendFormat": "{{node}} attempt fails",
+     "expr": "sum by (node) (rate(ebpf_tcp_connect_failed_total{node=~\"$node\"}[5m]))",
+     "legendFormat": "{{node}} connect failed",
      "refId": "A",
      "datasource": {
       "type": "prometheus",
@@ -715,8 +715,8 @@
      }
     },
     {
-     "expr": "sum by (node) (rate(node_netstat_Tcp_EstabResets[5m]) * on (instance) group_left (node) max by (instance, node) (label_replace(kube_node_info{node=~\"$node\"}, \"instance\", \"$1:9100\", \"internal_ip\", \"(.*)\")))",
-     "legendFormat": "{{node}} estab resets",
+     "expr": "sum by (node) (rate(node_netstat_Tcp_OutRsts[5m]) * on (instance) group_left (node) max by (instance, node) (label_replace(kube_node_info{node=~\"$node\"}, \"instance\", \"$1:9100\", \"internal_ip\", \"(.*)\")))",
+     "legendFormat": "{{node}} RST sent",
      "refId": "B",
      "datasource": {
       "type": "prometheus",
