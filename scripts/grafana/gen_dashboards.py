@@ -83,38 +83,6 @@ def panel(title, targets, unit="short", thresholds=(), description="", max_val=N
     return p
 
 
-def stat(title, expr, description="", link_uid=None):
-    """A one-value stat panel colored by firing proximity (1.0 = threshold)."""
-    p = {
-        "type": "stat",
-        "title": title,
-        "description": description,
-        "datasource": DS,
-        "fieldConfig": {
-            "defaults": {
-                "unit": "percentunit",
-                "min": 0,
-                "thresholds": {"mode": "absolute", "steps": [
-                    {"color": "green", "value": None},
-                    {"color": "#EAB839", "value": 0.7},
-                    {"color": "red", "value": 1},
-                ]},
-            },
-            "overrides": [],
-        },
-        "options": {
-            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
-            "colorMode": "background", "graphMode": "area",
-            "justifyMode": "auto", "textMode": "auto", "orientation": "auto",
-        },
-        "targets": [{"expr": expr, "legendFormat": "", "refId": "A", "datasource": DS}],
-        "_w": 3, "_h": 5,
-    }
-    if link_uid:
-        p["links"] = [{"title": title, "url": f"/d/{link_uid}"}]
-    return p
-
-
 def variable_node():
     return {
         "name": "node",
@@ -530,15 +498,15 @@ def p_alerts_firing():
         description="Every scenario rule currently firing. Jump to the matching nd-rule-N incident dashboard.")
 
 
-def rule_gauges():
-    """Firing proximity per rule: current trigger value / rule threshold.
+def p_rule_proximity():
+    """One horizontal bar per rule: current trigger value / rule threshold.
 
     1.0 (100%) = the trigger condition is met right now (the `for:` clock is
     running). AND-rules (1, 5) take the LOWER of their two ratios via
     clamp_max(vec, scalar) — both signals must exceed. OR-rules (2, 3, 4) take
     the HIGHER via clamp_min. Rule 7 is gated to 0 while the network is noisy
     (its `unless` clause). Rules 3/8 fire on "any drops", rendered as
-    0.01 drops/s = 100%. `or vector(0)` keeps gauges at 0 when a series does
+    0.01 drops/s = 100%. `or vector(0)` keeps bars at 0 when a series does
     not exist yet (e.g. no Hubble drop seen so far).
     """
     lat = ('max(histogram_quantile(0.99, sum by (le, namespace, service, node) '
@@ -557,42 +525,63 @@ def rule_gauges():
     dns_slow = 'max(sum by (node) (rate(ebpf_dns_slow_total[5m])))'
     denied = (f'max(sum by (node) (rate(hubble_drop_total{{reason=~"POLICY_DENIED|POLICY_DENY"}}[5m]) {J9965}))')
 
-    return [
-        stat("R1 congestion",
-             f'clamp_max({lat} / 0.5, scalar({retrans} / 0.2 or vector(0))) or vector(0)',
-             "min(p99/500ms, retransmits/0.2) — both must exceed (same-node check omitted here).",
-             link_uid="nd-rule-1"),
-        stat("R2 kernel",
-             f'clamp_min(max(sum by (node) (rate(node_softnet_dropped_total[5m]) {J9100})) / 1, '
-             f'scalar(max(sum by (node) (rate(node_network_receive_drop_total{{{NIC}}}[5m]) {J9100})) / 10 '
-             'or vector(0))) or vector(0)',
-             "max(softnet drops/1, NIC rx drops/10) — either fires.",
-             link_uid="nd-rule-2"),
-        stat("R3 conntrack",
-             f'clamp_min({ct_ratio} / 0.8, scalar({ct_fail} / 0.01 or vector(0))) or vector(0)',
-             "max(usage/80%, CT insert failures where 0.01/s = 100%).",
-             link_uid="nd-rule-3"),
-        stat("R4 CoreDNS",
-             f'clamp_min({coredns} / 0.25, scalar({servfail} / 0.05 or vector(0))) or vector(0)',
-             "max(p99/250ms, SERVFAIL ratio/5%).",
-             link_uid="nd-rule-4"),
-        stat("R5 DNS×CT",
-             f'clamp_max({dns_slow} / 0.1, scalar({ct_ratio} / 0.5 or vector(0))) or vector(0)',
-             "min(slow DNS/0.1, conntrack/50%) — both must exceed (same-node check omitted here).",
-             link_uid="nd-rule-5"),
-        stat("R6 node-local",
-             f'{connfail} / 0.1 or vector(0)',
-             "worst node connect-failure ratio / 10% (single-node condition omitted here).",
-             link_uid="nd-rule-6"),
-        stat("R7 app 5xx",
-             f'({fivexx} / 0.05) * scalar({retrans} <= bool 0.2) or vector(0)',
-             "5xx ratio/5%, forced to 0 while any node retransmits > 0.2/s (the rule's unless clause).",
-             link_uid="nd-rule-7"),
-        stat("R8 policy",
-             f'{denied} / 0.01 or vector(0)',
-             "POLICY_DENIED drops where 0.01/s = 100% (the rule fires on any sustained drops).",
-             link_uid="nd-rule-8"),
+    targets = [
+        (f'clamp_max({lat} / 0.5, scalar({retrans} / 0.2 or vector(0))) or vector(0)',
+         "Rule 1 · Network congestion  (p99 AND retransmits — lower of the two)"),
+        (f'clamp_min(max(sum by (node) (rate(node_softnet_dropped_total[5m]) {J9100})) / 1, '
+         f'scalar(max(sum by (node) (rate(node_network_receive_drop_total{{{NIC}}}[5m]) {J9100})) / 10 '
+         'or vector(0))) or vector(0)',
+         "Rule 2 · Kernel bottleneck  (softnet OR NIC drops — higher of the two)"),
+        (f'clamp_min({ct_ratio} / 0.8, scalar({ct_fail} / 0.01 or vector(0))) or vector(0)',
+         "Rule 3 · Conntrack exhaustion  (usage/80% OR CT insert failures)"),
+        (f'clamp_min({coredns} / 0.25, scalar({servfail} / 0.05 or vector(0))) or vector(0)',
+         "Rule 4 · CoreDNS degradation  (p99/250ms OR SERVFAIL/5%)"),
+        (f'clamp_max({dns_slow} / 0.1, scalar({ct_ratio} / 0.5 or vector(0))) or vector(0)',
+         "Rule 5 · DNS × conntrack  (slow DNS AND conntrack/50% — lower of the two)"),
+        (f'{connfail} / 0.1 or vector(0)',
+         "Rule 6 · Node-localized failure  (worst node connect-fail ratio / 10%)"),
+        (f'({fivexx} / 0.05) * scalar({retrans} <= bool 0.2) or vector(0)',
+         "Rule 7 · App-induced  (5xx/5%, zeroed while the network is noisy)"),
+        (f'{denied} / 0.01 or vector(0)',
+         "Rule 8 · NetworkPolicy denied  (POLICY_DENIED drops, 0.01/s = 100%)"),
     ]
+    return {
+        "type": "bargauge",
+        "title": "Rule firing proximity — 100% = trigger condition met, for: timer starts",
+        "description": "Each bar replays its rule's trigger query divided by the rule threshold, "
+                       "so all eight rules land on one scale: how close is this rule to firing. "
+                       "Yellow from 70%, red at 100%. Actually-firing alerts (trigger held for the "
+                       "rule's `for:` duration) appear in the panel below. Panel links (top-left "
+                       "corner menu) jump to each rule's incident dashboard.",
+        "datasource": DS,
+        "fieldConfig": {
+            "defaults": {
+                "unit": "percentunit",
+                "min": 0,
+                "max": 1.2,
+                "thresholds": {"mode": "absolute", "steps": [
+                    {"color": "green", "value": None},
+                    {"color": "#EAB839", "value": 0.7},
+                    {"color": "red", "value": 1},
+                ]},
+            },
+            "overrides": [],
+        },
+        "options": {
+            "orientation": "horizontal",
+            "displayMode": "basic",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
+            "showUnfilled": True,
+            "valueMode": "color",
+        },
+        "targets": [
+            {"expr": expr, "legendFormat": legend, "refId": chr(65 + i), "datasource": DS}
+            for i, (expr, legend) in enumerate(targets)
+        ],
+        "links": [{"title": f"Rule {n} incident dashboard", "url": f"/d/nd-rule-{n}"}
+                  for n in range(1, 9)],
+        "_h": 9,
+    }
 
 
 # --------------------------------------------------------------------------
@@ -601,8 +590,7 @@ def rule_gauges():
 
 def overview():
     rows = [
-        ("Rule firing proximity — 100% = trigger condition met", rule_gauges()),
-        ("NetworkDoctor alerts", [p_alerts_firing()]),
+        ("NetworkDoctor rules", [p_rule_proximity(), p_alerts_firing()]),
         ("L7 — Application (Rule 1·7)", [p_app_p99(), p_5xx_ratio(), p_req_rate()]),
         ("DNS (Rule 4·5)", [p_coredns_p99(), p_servfail_ratio(), p_dns_slow(), p_dns_client_p99()]),
         ("TCP — eBPF (Rule 1·6)", [p_retransmits(), p_connect_fail_ratio(), p_srtt(), p_conn_gauges()]),

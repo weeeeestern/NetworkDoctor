@@ -126,7 +126,7 @@
  "panels": [
   {
    "type": "row",
-   "title": "Rule firing proximity — 100% = trigger condition met",
+   "title": "NetworkDoctor rules",
    "collapsed": false,
    "gridPos": {
     "h": 1,
@@ -138,9 +138,9 @@
    "panels": []
   },
   {
-   "type": "stat",
-   "title": "R1 congestion",
-   "description": "min(p99/500ms, retransmits/0.2) — both must exceed (same-node check omitted here).",
+   "type": "bargauge",
+   "title": "Rule firing proximity — 100% = trigger condition met, for: timer starts",
+   "description": "Each bar replays its rule's trigger query divided by the rule threshold, so all eight rules land on one scale: how close is this rule to firing. Yellow from 70%, red at 100%. Actually-firing alerts (trigger held for the rule's `for:` duration) appear in the panel below. Panel links (top-left corner menu) jump to each rule's incident dashboard.",
    "datasource": {
     "type": "prometheus",
     "uid": "${datasource}"
@@ -149,6 +149,7 @@
     "defaults": {
      "unit": "percentunit",
      "min": 0,
+     "max": 1.2,
      "thresholds": {
       "mode": "absolute",
       "steps": [
@@ -170,6 +171,8 @@
     "overrides": []
    },
    "options": {
+    "orientation": "horizontal",
+    "displayMode": "basic",
     "reduceOptions": {
      "calcs": [
       "lastNotNull"
@@ -177,514 +180,77 @@
      "fields": "",
      "values": false
     },
-    "colorMode": "background",
-    "graphMode": "area",
-    "justifyMode": "auto",
-    "textMode": "auto",
-    "orientation": "auto"
+    "showUnfilled": true,
+    "valueMode": "color"
    },
    "targets": [
     {
      "expr": "clamp_max(max(histogram_quantile(0.99, sum by (le, namespace, service, node) (rate(http_request_duration_seconds_bucket[5m])))) / 0.5, scalar(max(sum by (node) (rate(ebpf_tcp_retransmits_total[5m]))) / 0.2 or vector(0))) or vector(0)",
-     "legendFormat": "",
+     "legendFormat": "Rule 1 · Network congestion  (p99 AND retransmits — lower of the two)",
      "refId": "A",
      "datasource": {
       "type": "prometheus",
       "uid": "${datasource}"
      }
-    }
-   ],
-   "links": [
-    {
-     "title": "R1 congestion",
-     "url": "/d/nd-rule-1"
-    }
-   ],
-   "gridPos": {
-    "h": 5,
-    "w": 3,
-    "x": 0,
-    "y": 1
-   },
-   "id": 2
-  },
-  {
-   "type": "stat",
-   "title": "R2 kernel",
-   "description": "max(softnet drops/1, NIC rx drops/10) — either fires.",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "${datasource}"
-   },
-   "fieldConfig": {
-    "defaults": {
-     "unit": "percentunit",
-     "min": 0,
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       },
-       {
-        "color": "#EAB839",
-        "value": 0.7
-       },
-       {
-        "color": "red",
-        "value": 1
-       }
-      ]
-     }
     },
-    "overrides": []
-   },
-   "options": {
-    "reduceOptions": {
-     "calcs": [
-      "lastNotNull"
-     ],
-     "fields": "",
-     "values": false
-    },
-    "colorMode": "background",
-    "graphMode": "area",
-    "justifyMode": "auto",
-    "textMode": "auto",
-    "orientation": "auto"
-   },
-   "targets": [
     {
      "expr": "clamp_min(max(sum by (node) (rate(node_softnet_dropped_total[5m]) * on (instance) group_left (node) max by (instance, node) (label_replace(kube_node_info{node=~\"$node\"}, \"instance\", \"$1:9100\", \"internal_ip\", \"(.*)\")))) / 1, scalar(max(sum by (node) (rate(node_network_receive_drop_total{device!~\"lo|veth.*|lxc.*|cilium.*|tailscale.*|docker.*\"}[5m]) * on (instance) group_left (node) max by (instance, node) (label_replace(kube_node_info{node=~\"$node\"}, \"instance\", \"$1:9100\", \"internal_ip\", \"(.*)\")))) / 10 or vector(0))) or vector(0)",
-     "legendFormat": "",
-     "refId": "A",
+     "legendFormat": "Rule 2 · Kernel bottleneck  (softnet OR NIC drops — higher of the two)",
+     "refId": "B",
      "datasource": {
       "type": "prometheus",
       "uid": "${datasource}"
      }
-    }
-   ],
-   "links": [
-    {
-     "title": "R2 kernel",
-     "url": "/d/nd-rule-2"
-    }
-   ],
-   "gridPos": {
-    "h": 5,
-    "w": 3,
-    "x": 3,
-    "y": 1
-   },
-   "id": 3
-  },
-  {
-   "type": "stat",
-   "title": "R3 conntrack",
-   "description": "max(usage/80%, CT insert failures where 0.01/s = 100%).",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "${datasource}"
-   },
-   "fieldConfig": {
-    "defaults": {
-     "unit": "percentunit",
-     "min": 0,
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       },
-       {
-        "color": "#EAB839",
-        "value": 0.7
-       },
-       {
-        "color": "red",
-        "value": 1
-       }
-      ]
-     }
     },
-    "overrides": []
-   },
-   "options": {
-    "reduceOptions": {
-     "calcs": [
-      "lastNotNull"
-     ],
-     "fields": "",
-     "values": false
-    },
-    "colorMode": "background",
-    "graphMode": "area",
-    "justifyMode": "auto",
-    "textMode": "auto",
-    "orientation": "auto"
-   },
-   "targets": [
     {
      "expr": "clamp_min(max((node_nf_conntrack_entries / node_nf_conntrack_entries_limit) * on (instance) group_left (node) max by (instance, node) (label_replace(kube_node_info{node=~\"$node\"}, \"instance\", \"$1:9100\", \"internal_ip\", \"(.*)\"))) / 0.8, scalar(max(sum by (node) (rate(hubble_drop_total{reason=\"CT_MAP_INSERTION_FAILED\"}[5m]) * on (instance) group_left (node) max by (instance, node) (label_replace(kube_node_info{node=~\"$node\"}, \"instance\", \"$1:9965\", \"internal_ip\", \"(.*)\")))) / 0.01 or vector(0))) or vector(0)",
-     "legendFormat": "",
-     "refId": "A",
+     "legendFormat": "Rule 3 · Conntrack exhaustion  (usage/80% OR CT insert failures)",
+     "refId": "C",
      "datasource": {
       "type": "prometheus",
       "uid": "${datasource}"
      }
-    }
-   ],
-   "links": [
-    {
-     "title": "R3 conntrack",
-     "url": "/d/nd-rule-3"
-    }
-   ],
-   "gridPos": {
-    "h": 5,
-    "w": 3,
-    "x": 6,
-    "y": 1
-   },
-   "id": 4
-  },
-  {
-   "type": "stat",
-   "title": "R4 CoreDNS",
-   "description": "max(p99/250ms, SERVFAIL ratio/5%).",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "${datasource}"
-   },
-   "fieldConfig": {
-    "defaults": {
-     "unit": "percentunit",
-     "min": 0,
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       },
-       {
-        "color": "#EAB839",
-        "value": 0.7
-       },
-       {
-        "color": "red",
-        "value": 1
-       }
-      ]
-     }
     },
-    "overrides": []
-   },
-   "options": {
-    "reduceOptions": {
-     "calcs": [
-      "lastNotNull"
-     ],
-     "fields": "",
-     "values": false
-    },
-    "colorMode": "background",
-    "graphMode": "area",
-    "justifyMode": "auto",
-    "textMode": "auto",
-    "orientation": "auto"
-   },
-   "targets": [
     {
      "expr": "clamp_min(max(histogram_quantile(0.99, sum by (le, namespace, service) (rate(coredns_dns_request_duration_seconds_bucket[5m])))) / 0.25, scalar(max(sum by (namespace, service) (rate(coredns_dns_responses_total{rcode=\"SERVFAIL\"}[5m])) / clamp_min(sum by (namespace, service) (rate(coredns_dns_responses_total[5m])), 0.001)) / 0.05 or vector(0))) or vector(0)",
-     "legendFormat": "",
-     "refId": "A",
+     "legendFormat": "Rule 4 · CoreDNS degradation  (p99/250ms OR SERVFAIL/5%)",
+     "refId": "D",
      "datasource": {
       "type": "prometheus",
       "uid": "${datasource}"
      }
-    }
-   ],
-   "links": [
-    {
-     "title": "R4 CoreDNS",
-     "url": "/d/nd-rule-4"
-    }
-   ],
-   "gridPos": {
-    "h": 5,
-    "w": 3,
-    "x": 9,
-    "y": 1
-   },
-   "id": 5
-  },
-  {
-   "type": "stat",
-   "title": "R5 DNS×CT",
-   "description": "min(slow DNS/0.1, conntrack/50%) — both must exceed (same-node check omitted here).",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "${datasource}"
-   },
-   "fieldConfig": {
-    "defaults": {
-     "unit": "percentunit",
-     "min": 0,
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       },
-       {
-        "color": "#EAB839",
-        "value": 0.7
-       },
-       {
-        "color": "red",
-        "value": 1
-       }
-      ]
-     }
     },
-    "overrides": []
-   },
-   "options": {
-    "reduceOptions": {
-     "calcs": [
-      "lastNotNull"
-     ],
-     "fields": "",
-     "values": false
-    },
-    "colorMode": "background",
-    "graphMode": "area",
-    "justifyMode": "auto",
-    "textMode": "auto",
-    "orientation": "auto"
-   },
-   "targets": [
     {
      "expr": "clamp_max(max(sum by (node) (rate(ebpf_dns_slow_total[5m]))) / 0.1, scalar(max((node_nf_conntrack_entries / node_nf_conntrack_entries_limit) * on (instance) group_left (node) max by (instance, node) (label_replace(kube_node_info{node=~\"$node\"}, \"instance\", \"$1:9100\", \"internal_ip\", \"(.*)\"))) / 0.5 or vector(0))) or vector(0)",
-     "legendFormat": "",
-     "refId": "A",
+     "legendFormat": "Rule 5 · DNS × conntrack  (slow DNS AND conntrack/50% — lower of the two)",
+     "refId": "E",
      "datasource": {
       "type": "prometheus",
       "uid": "${datasource}"
      }
-    }
-   ],
-   "links": [
-    {
-     "title": "R5 DNS×CT",
-     "url": "/d/nd-rule-5"
-    }
-   ],
-   "gridPos": {
-    "h": 5,
-    "w": 3,
-    "x": 12,
-    "y": 1
-   },
-   "id": 6
-  },
-  {
-   "type": "stat",
-   "title": "R6 node-local",
-   "description": "worst node connect-failure ratio / 10% (single-node condition omitted here).",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "${datasource}"
-   },
-   "fieldConfig": {
-    "defaults": {
-     "unit": "percentunit",
-     "min": 0,
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       },
-       {
-        "color": "#EAB839",
-        "value": 0.7
-       },
-       {
-        "color": "red",
-        "value": 1
-       }
-      ]
-     }
     },
-    "overrides": []
-   },
-   "options": {
-    "reduceOptions": {
-     "calcs": [
-      "lastNotNull"
-     ],
-     "fields": "",
-     "values": false
-    },
-    "colorMode": "background",
-    "graphMode": "area",
-    "justifyMode": "auto",
-    "textMode": "auto",
-    "orientation": "auto"
-   },
-   "targets": [
     {
      "expr": "max(sum by (node) (rate(ebpf_tcp_connect_failed_total[5m])) / clamp_min(sum by (node) (rate(ebpf_tcp_connect_attempts_total[5m])), 0.001)) / 0.1 or vector(0)",
-     "legendFormat": "",
-     "refId": "A",
+     "legendFormat": "Rule 6 · Node-localized failure  (worst node connect-fail ratio / 10%)",
+     "refId": "F",
      "datasource": {
       "type": "prometheus",
       "uid": "${datasource}"
      }
-    }
-   ],
-   "links": [
-    {
-     "title": "R6 node-local",
-     "url": "/d/nd-rule-6"
-    }
-   ],
-   "gridPos": {
-    "h": 5,
-    "w": 3,
-    "x": 15,
-    "y": 1
-   },
-   "id": 7
-  },
-  {
-   "type": "stat",
-   "title": "R7 app 5xx",
-   "description": "5xx ratio/5%, forced to 0 while any node retransmits > 0.2/s (the rule's unless clause).",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "${datasource}"
-   },
-   "fieldConfig": {
-    "defaults": {
-     "unit": "percentunit",
-     "min": 0,
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       },
-       {
-        "color": "#EAB839",
-        "value": 0.7
-       },
-       {
-        "color": "red",
-        "value": 1
-       }
-      ]
-     }
     },
-    "overrides": []
-   },
-   "options": {
-    "reduceOptions": {
-     "calcs": [
-      "lastNotNull"
-     ],
-     "fields": "",
-     "values": false
-    },
-    "colorMode": "background",
-    "graphMode": "area",
-    "justifyMode": "auto",
-    "textMode": "auto",
-    "orientation": "auto"
-   },
-   "targets": [
     {
      "expr": "(max(sum by (namespace, service) (rate(http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum by (namespace, service) (rate(http_requests_total[5m])), 0.001)) / 0.05) * scalar(max(sum by (node) (rate(ebpf_tcp_retransmits_total[5m]))) <= bool 0.2) or vector(0)",
-     "legendFormat": "",
-     "refId": "A",
+     "legendFormat": "Rule 7 · App-induced  (5xx/5%, zeroed while the network is noisy)",
+     "refId": "G",
      "datasource": {
       "type": "prometheus",
       "uid": "${datasource}"
      }
-    }
-   ],
-   "links": [
-    {
-     "title": "R7 app 5xx",
-     "url": "/d/nd-rule-7"
-    }
-   ],
-   "gridPos": {
-    "h": 5,
-    "w": 3,
-    "x": 18,
-    "y": 1
-   },
-   "id": 8
-  },
-  {
-   "type": "stat",
-   "title": "R8 policy",
-   "description": "POLICY_DENIED drops where 0.01/s = 100% (the rule fires on any sustained drops).",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "${datasource}"
-   },
-   "fieldConfig": {
-    "defaults": {
-     "unit": "percentunit",
-     "min": 0,
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       },
-       {
-        "color": "#EAB839",
-        "value": 0.7
-       },
-       {
-        "color": "red",
-        "value": 1
-       }
-      ]
-     }
     },
-    "overrides": []
-   },
-   "options": {
-    "reduceOptions": {
-     "calcs": [
-      "lastNotNull"
-     ],
-     "fields": "",
-     "values": false
-    },
-    "colorMode": "background",
-    "graphMode": "area",
-    "justifyMode": "auto",
-    "textMode": "auto",
-    "orientation": "auto"
-   },
-   "targets": [
     {
      "expr": "max(sum by (node) (rate(hubble_drop_total{reason=~\"POLICY_DENIED|POLICY_DENY\"}[5m]) * on (instance) group_left (node) max by (instance, node) (label_replace(kube_node_info{node=~\"$node\"}, \"instance\", \"$1:9965\", \"internal_ip\", \"(.*)\")))) / 0.01 or vector(0)",
-     "legendFormat": "",
-     "refId": "A",
+     "legendFormat": "Rule 8 · NetworkPolicy denied  (POLICY_DENIED drops, 0.01/s = 100%)",
+     "refId": "H",
      "datasource": {
       "type": "prometheus",
       "uid": "${datasource}"
@@ -693,30 +259,45 @@
    ],
    "links": [
     {
-     "title": "R8 policy",
+     "title": "Rule 1 incident dashboard",
+     "url": "/d/nd-rule-1"
+    },
+    {
+     "title": "Rule 2 incident dashboard",
+     "url": "/d/nd-rule-2"
+    },
+    {
+     "title": "Rule 3 incident dashboard",
+     "url": "/d/nd-rule-3"
+    },
+    {
+     "title": "Rule 4 incident dashboard",
+     "url": "/d/nd-rule-4"
+    },
+    {
+     "title": "Rule 5 incident dashboard",
+     "url": "/d/nd-rule-5"
+    },
+    {
+     "title": "Rule 6 incident dashboard",
+     "url": "/d/nd-rule-6"
+    },
+    {
+     "title": "Rule 7 incident dashboard",
+     "url": "/d/nd-rule-7"
+    },
+    {
+     "title": "Rule 8 incident dashboard",
      "url": "/d/nd-rule-8"
     }
    ],
    "gridPos": {
-    "h": 5,
-    "w": 3,
-    "x": 21,
+    "h": 9,
+    "w": 12,
+    "x": 0,
     "y": 1
    },
-   "id": 9
-  },
-  {
-   "type": "row",
-   "title": "NetworkDoctor alerts",
-   "collapsed": false,
-   "gridPos": {
-    "h": 1,
-    "w": 24,
-    "x": 0,
-    "y": 6
-   },
-   "id": 10,
-   "panels": []
+   "id": 2
   },
   {
    "type": "timeseries",
@@ -779,11 +360,11 @@
    ],
    "gridPos": {
     "h": 8,
-    "w": 24,
-    "x": 0,
-    "y": 7
+    "w": 12,
+    "x": 12,
+    "y": 1
    },
-   "id": 11
+   "id": 3
   },
   {
    "type": "row",
@@ -793,9 +374,9 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 15
+    "y": 10
    },
-   "id": 12,
+   "id": 4,
    "panels": []
   },
   {
@@ -865,9 +446,9 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 16
+    "y": 11
    },
-   "id": 13
+   "id": 5
   },
   {
    "type": "timeseries",
@@ -937,9 +518,9 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 16
+    "y": 11
    },
-   "id": 14
+   "id": 6
   },
   {
    "type": "timeseries",
@@ -1004,9 +585,9 @@
     "h": 8,
     "w": 24,
     "x": 0,
-    "y": 24
+    "y": 19
    },
-   "id": 15
+   "id": 7
   },
   {
    "type": "row",
@@ -1016,9 +597,9 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 32
+    "y": 27
    },
-   "id": 16,
+   "id": 8,
    "panels": []
   },
   {
@@ -1088,9 +669,9 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 33
+    "y": 28
    },
-   "id": 17
+   "id": 9
   },
   {
    "type": "timeseries",
@@ -1160,9 +741,9 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 33
+    "y": 28
    },
-   "id": 18
+   "id": 10
   },
   {
    "type": "timeseries",
@@ -1231,9 +812,9 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 41
+    "y": 36
    },
-   "id": 19
+   "id": 11
   },
   {
    "type": "timeseries",
@@ -1298,9 +879,9 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 41
+    "y": 36
    },
-   "id": 20
+   "id": 12
   },
   {
    "type": "row",
@@ -1310,9 +891,9 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 49
+    "y": 44
    },
-   "id": 21,
+   "id": 13,
    "panels": []
   },
   {
@@ -1382,9 +963,9 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 50
+    "y": 45
    },
-   "id": 22
+   "id": 14
   },
   {
    "type": "timeseries",
@@ -1454,9 +1035,9 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 50
+    "y": 45
    },
-   "id": 23
+   "id": 15
   },
   {
    "type": "timeseries",
@@ -1521,9 +1102,9 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 58
+    "y": 53
    },
-   "id": 24
+   "id": 16
   },
   {
    "type": "timeseries",
@@ -1597,9 +1178,9 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 58
+    "y": 53
    },
-   "id": 25
+   "id": 17
   },
   {
    "type": "row",
@@ -1609,9 +1190,9 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 66
+    "y": 61
    },
-   "id": 26,
+   "id": 18,
    "panels": []
   },
   {
@@ -1690,9 +1271,9 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 67
+    "y": 62
    },
-   "id": 27
+   "id": 19
   },
   {
    "type": "timeseries",
@@ -1770,9 +1351,9 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 67
+    "y": 62
    },
-   "id": 28
+   "id": 20
   },
   {
    "type": "timeseries",
@@ -1846,9 +1427,9 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 75
+    "y": 70
    },
-   "id": 29
+   "id": 21
   },
   {
    "type": "timeseries",
@@ -1913,9 +1494,9 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 75
+    "y": 70
    },
-   "id": 30
+   "id": 22
   },
   {
    "type": "row",
@@ -1925,9 +1506,9 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 83
+    "y": 78
    },
-   "id": 31,
+   "id": 23,
    "panels": []
   },
   {
@@ -2002,9 +1583,9 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 84
+    "y": 79
    },
-   "id": 32
+   "id": 24
   },
   {
    "type": "timeseries",
@@ -2069,9 +1650,9 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 84
+    "y": 79
    },
-   "id": 33
+   "id": 25
   },
   {
    "type": "row",
@@ -2081,9 +1662,9 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 92
+    "y": 87
    },
-   "id": 34,
+   "id": 26,
    "panels": []
   },
   {
@@ -2149,9 +1730,9 @@
     "h": 8,
     "w": 12,
     "x": 0,
-    "y": 93
+    "y": 88
    },
-   "id": 35
+   "id": 27
   },
   {
    "type": "timeseries",
@@ -2216,9 +1797,9 @@
     "h": 8,
     "w": 12,
     "x": 12,
-    "y": 93
+    "y": 88
    },
-   "id": 36
+   "id": 28
   }
  ]
 }
