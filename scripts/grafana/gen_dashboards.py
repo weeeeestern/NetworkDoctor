@@ -83,6 +83,38 @@ def panel(title, targets, unit="short", thresholds=(), description="", max_val=N
     return p
 
 
+def stat(title, expr, description="", link_uid=None):
+    """A one-value stat panel colored by firing proximity (1.0 = threshold)."""
+    p = {
+        "type": "stat",
+        "title": title,
+        "description": description,
+        "datasource": DS,
+        "fieldConfig": {
+            "defaults": {
+                "unit": "percentunit",
+                "min": 0,
+                "thresholds": {"mode": "absolute", "steps": [
+                    {"color": "green", "value": None},
+                    {"color": "#EAB839", "value": 0.7},
+                    {"color": "red", "value": 1},
+                ]},
+            },
+            "overrides": [],
+        },
+        "options": {
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
+            "colorMode": "background", "graphMode": "area",
+            "justifyMode": "auto", "textMode": "auto", "orientation": "auto",
+        },
+        "targets": [{"expr": expr, "legendFormat": "", "refId": "A", "datasource": DS}],
+        "_w": 3, "_h": 5,
+    }
+    if link_uid:
+        p["links"] = [{"title": title, "url": f"/d/{link_uid}"}]
+    return p
+
+
 def variable_node():
     return {
         "name": "node",
@@ -125,22 +157,30 @@ def dashboard(uid, title, rows, tags, annotations=(), description=""):
         })
         pid += 1
         y += 1
-        line_x = 0
+        # Pack panels left to right, wrapping at 24 columns. Panels may carry
+        # _w/_h hints (e.g. the gauge strip); default panels are 12x8, and a
+        # trailing odd default panel stretches to the full width.
+        x, line_h = 0, 0
         for i, p in enumerate(row_panels):
-            last_and_odd = (i == len(row_panels) - 1) and (len(row_panels) % 2 == 1)
-            w = 24 if last_and_odd else 12
             p = dict(p)
-            p["gridPos"] = {"h": 8, "w": w, "x": line_x, "y": y}
+            w = p.pop("_w", 12)
+            h = p.pop("_h", 8)
+            if w == 12 and i == len(row_panels) - 1 and x == 0:
+                w = 24
+            if x + w > 24:
+                y += line_h
+                x, line_h = 0, 0
+            p["gridPos"] = {"h": h, "w": w, "x": x, "y": y}
             p["id"] = pid
             pid += 1
             panels.append(p)
-            if line_x == 0 and not last_and_odd:
-                line_x = 12
-            else:
-                line_x = 0
-                y += 8
-        if line_x == 12:
-            y += 8
+            x += w
+            line_h = max(line_h, h)
+            if x >= 24:
+                y += line_h
+                x, line_h = 0, 0
+        if x > 0:
+            y += line_h
 
     anno_list = [{
         "builtIn": 1, "datasource": {"type": "grafana", "uid": "-- Grafana --"},
@@ -490,12 +530,78 @@ def p_alerts_firing():
         description="Every scenario rule currently firing. Jump to the matching nd-rule-N incident dashboard.")
 
 
+def rule_gauges():
+    """Firing proximity per rule: current trigger value / rule threshold.
+
+    1.0 (100%) = the trigger condition is met right now (the `for:` clock is
+    running). AND-rules (1, 5) take the LOWER of their two ratios via
+    clamp_max(vec, scalar) — both signals must exceed. OR-rules (2, 3, 4) take
+    the HIGHER via clamp_min. Rule 7 is gated to 0 while the network is noisy
+    (its `unless` clause). Rules 3/8 fire on "any drops", rendered as
+    0.01 drops/s = 100%. `or vector(0)` keeps gauges at 0 when a series does
+    not exist yet (e.g. no Hubble drop seen so far).
+    """
+    lat = ('max(histogram_quantile(0.99, sum by (le, namespace, service, node) '
+           '(rate(http_request_duration_seconds_bucket[5m]))))')
+    retrans = 'max(sum by (node) (rate(ebpf_tcp_retransmits_total[5m])))'
+    ct_ratio = f'max((node_nf_conntrack_entries / node_nf_conntrack_entries_limit) {J9100})'
+    ct_fail = (f'max(sum by (node) (rate(hubble_drop_total{{reason="CT_MAP_INSERTION_FAILED"}}[5m]) {J9965}))')
+    servfail = ('max(sum by (namespace, service) (rate(coredns_dns_responses_total{rcode="SERVFAIL"}[5m])) '
+                '/ clamp_min(sum by (namespace, service) (rate(coredns_dns_responses_total[5m])), 0.001))')
+    coredns = ('max(histogram_quantile(0.99, sum by (le, namespace, service) '
+               '(rate(coredns_dns_request_duration_seconds_bucket[5m]))))')
+    fivexx = ('max(sum by (namespace, service) (rate(http_requests_total{status=~"5.."}[5m])) '
+              '/ clamp_min(sum by (namespace, service) (rate(http_requests_total[5m])), 0.001))')
+    connfail = ('max(sum by (node) (rate(ebpf_tcp_connect_failed_total[5m])) '
+                '/ clamp_min(sum by (node) (rate(ebpf_tcp_connect_attempts_total[5m])), 0.001))')
+    dns_slow = 'max(sum by (node) (rate(ebpf_dns_slow_total[5m])))'
+    denied = (f'max(sum by (node) (rate(hubble_drop_total{{reason=~"POLICY_DENIED|POLICY_DENY"}}[5m]) {J9965}))')
+
+    return [
+        stat("R1 congestion",
+             f'clamp_max({lat} / 0.5, scalar({retrans} / 0.2 or vector(0))) or vector(0)',
+             "min(p99/500ms, retransmits/0.2) — both must exceed (same-node check omitted here).",
+             link_uid="nd-rule-1"),
+        stat("R2 kernel",
+             f'clamp_min(max(sum by (node) (rate(node_softnet_dropped_total[5m]) {J9100})) / 1, '
+             f'scalar(max(sum by (node) (rate(node_network_receive_drop_total{{{NIC}}}[5m]) {J9100})) / 10 '
+             'or vector(0))) or vector(0)',
+             "max(softnet drops/1, NIC rx drops/10) — either fires.",
+             link_uid="nd-rule-2"),
+        stat("R3 conntrack",
+             f'clamp_min({ct_ratio} / 0.8, scalar({ct_fail} / 0.01 or vector(0))) or vector(0)',
+             "max(usage/80%, CT insert failures where 0.01/s = 100%).",
+             link_uid="nd-rule-3"),
+        stat("R4 CoreDNS",
+             f'clamp_min({coredns} / 0.25, scalar({servfail} / 0.05 or vector(0))) or vector(0)',
+             "max(p99/250ms, SERVFAIL ratio/5%).",
+             link_uid="nd-rule-4"),
+        stat("R5 DNS×CT",
+             f'clamp_max({dns_slow} / 0.1, scalar({ct_ratio} / 0.5 or vector(0))) or vector(0)',
+             "min(slow DNS/0.1, conntrack/50%) — both must exceed (same-node check omitted here).",
+             link_uid="nd-rule-5"),
+        stat("R6 node-local",
+             f'{connfail} / 0.1 or vector(0)',
+             "worst node connect-failure ratio / 10% (single-node condition omitted here).",
+             link_uid="nd-rule-6"),
+        stat("R7 app 5xx",
+             f'({fivexx} / 0.05) * scalar({retrans} <= bool 0.2) or vector(0)',
+             "5xx ratio/5%, forced to 0 while any node retransmits > 0.2/s (the rule's unless clause).",
+             link_uid="nd-rule-7"),
+        stat("R8 policy",
+             f'{denied} / 0.01 or vector(0)',
+             "POLICY_DENIED drops where 0.01/s = 100% (the rule fires on any sustained drops).",
+             link_uid="nd-rule-8"),
+    ]
+
+
 # --------------------------------------------------------------------------
 # Dashboards
 # --------------------------------------------------------------------------
 
 def overview():
     rows = [
+        ("Rule firing proximity — 100% = trigger condition met", rule_gauges()),
         ("NetworkDoctor alerts", [p_alerts_firing()]),
         ("L7 — Application (Rule 1·7)", [p_app_p99(), p_5xx_ratio(), p_req_rate()]),
         ("DNS (Rule 4·5)", [p_coredns_p99(), p_servfail_ratio(), p_dns_slow(), p_dns_client_p99()]),
