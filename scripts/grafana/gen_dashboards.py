@@ -354,10 +354,13 @@ def p_tcp_opens():
 
 
 def p_tcp_fails():
+    # node_netstat_Tcp_AttemptFails / Tcp_EstabResets are not in
+    # node-exporter's default netstat whitelist, so they don't exist on the
+    # lab cluster; eBPF connect failures + outgoing RSTs cover the same signal.
     return panel(
-        "Kernel TCP failures / resets by node",
-        [(f'sum by (node) (rate(node_netstat_Tcp_AttemptFails[5m]) {J9100})', "{{node}} attempt fails"),
-         (f'sum by (node) (rate(node_netstat_Tcp_EstabResets[5m]) {J9100})', "{{node}} estab resets")],
+        "TCP connect failures / RSTs by node",
+        [('sum by (node) (rate(ebpf_tcp_connect_failed_total{node=~"$node"}[5m]))', "{{node}} connect failed"),
+         (f'sum by (node) (rate(node_netstat_Tcp_OutRsts[5m]) {J9100})', "{{node}} RST sent")],
         unit="ops")
 
 
