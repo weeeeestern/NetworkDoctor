@@ -590,7 +590,8 @@ def p_rule_proximity():
 
 def overview():
     rows = [
-        ("NetworkDoctor rules", [p_rule_proximity(), p_alerts_firing()]),
+        ("Rule firing proximity", [p_rule_proximity()]),
+        ("Firing alerts", [p_alerts_firing()]),
         ("L7 — Application (Rule 1·7)", [p_app_p99(), p_5xx_ratio(), p_req_rate()]),
         ("DNS (Rule 4·5)", [p_coredns_p99(), p_servfail_ratio(), p_dns_slow(), p_dns_client_p99()]),
         ("TCP — eBPF (Rule 1·6)", [p_retransmits(), p_connect_fail_ratio(), p_srtt(), p_conn_gauges()]),
