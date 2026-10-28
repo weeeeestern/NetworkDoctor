@@ -1,7 +1,7 @@
 ---
 name: network-congestion
 description: Use for NetworkDoctor alerts labeled rule_id=rule-1 or scenario=network-congestion. Investigate Network Doctor Rule 1 alerts for Kubernetes network congestion by correlating application p99 latency, TCP retransmits, TCP RTT, TCP cwnd, NIC traffic/drop, run queue latency, and Hubble flow evidence.
-last_updated: 2026-10-02
+last_updated: 2026-10-28
 ---
 
 ## Goal
@@ -125,9 +125,13 @@ avg by (node, src_pod, dst_pod) (ebpf_tcp_cwnd{node=~"$node"})
    - Exclude loopback, veth, cilium, docker, flannel, and container-only interfaces unless the alert specifically names one.
    - Compare affected node interface utilization and drops with peer nodes.
 
-5. Exclude application scheduling delay.
-   - Query run queue latency and CPU saturation on the affected node.
-   - If p99 application latency rises while TCP RTT/retransmission stays flat and run queue latency rises, classify as application/node scheduling delay rather than network congestion.
+5. Separate network congestion from node CPU / scheduling pressure (locate the loss).
+   - Query run queue latency and CPU saturation on the affected node, plus host packet-drop counters: softnet drops (`node_softnet_dropped_total`) and NIC receive drops / ring overflow (`node_network_receive_drop_total`, receive fifo/missed errors).
+   - Causal fact: elevated TCP retransmissions always mean packets were lost somewhere — retransmission is never a direct symptom of CPU time. CPU saturation can cause retransmissions, but only indirectly: when the host is too busy to drain the NIC ring / softnet backlog it drops received packets, which forces retransmits. That host-side loss is observable as elevated softnet / NIC-receive drops.
+   - So locate the loss instead of assuming the cause:
+     - Retransmissions elevated AND softnet / NIC-receive drops NOT elevated → the loss is on-wire / congestion (or remote); a co-occurring CPU or run-queue spike is NOT the cause — record it under excluded_alternatives.
+     - Retransmissions elevated AND softnet / NIC-receive drops elevated together with CPU saturation → the loss is host-side (the node cannot keep up); attribute it to node CPU / scheduling pressure, not on-wire congestion.
+   - Classify as node scheduling delay with no congestion when TCP RTT and retransmissions stay flat while application p99 latency and run-queue latency rise together.
 
 6. Inspect Hubble flows only for the scoped traffic.
    - Use HTTP flow observation when L7 labels are available.
@@ -148,6 +152,8 @@ Confirm network congestion when all are true:
 - TCP cwnd decreased, remained abnormally low, or NIC drops/errors/utilization increased.
 - The timing aligns within the primary window.
 - Run queue latency does not fully explain the latency increase.
+
+Decisive rule: elevated TCP retransmissions always mean packet loss — confirm congestion only after locating that loss. If softnet and NIC-receive drops are normal, the loss is on-wire / congestion and a co-occurring CPU spike is a separate finding (excluded_alternatives), not the cause. If softnet / NIC-receive drops are elevated alongside CPU saturation, the loss is host-side and the cause is node CPU / scheduling pressure, not congestion.
 
 Classify as likely microburst when:
 
