@@ -78,3 +78,53 @@ the checker sits behind an interface so it can be replaced or turned off.
 - 15 cases is a small sample. Report counts, not just percentages, and repeat runs (`--repeat`) before claiming a difference.
 - The derived facts were designed after seeing Rule 1 and Rule 4 fail, so those scenarios favour `derived`. The other scenarios are the control.
 - Replay cannot see deleted Kubernetes objects. Use live runs for the final numbers.
+
+## Ablation: context and skills (`ablation.py`)
+
+`run.py` changes what the backend does. `ablation.py` changes the question
+instead: it asks Holmes `/api/chat` directly about a live fault, so you can
+remove the alert context or the skills and see what each one contributes.
+
+| Ask style | What Holmes gets |
+| --- | --- |
+| `full` | What the backend sends: rule labels, node, investigation window, optional related alerts (`--related`) |
+| `symptom` | Only an operator-style report about one node (`--symptom`, or a neutral default) |
+| `blind` | "Is there any network problem in the cluster right now?" |
+
+An arm is `name=style@endpoint`. Endpoints are `ns/svc` (port-forwarded) or a
+URL. `scripts/repro/holmes-variant.sh` starts a Holmes without skills (`up raw`)
+or with skills from a branch (`up ref <git-ref>`), with the same model, key and
+toolsets as production.
+
+```bash
+bash scripts/repro/holmes-variant.sh up raw
+python3 eval/ablation.py --script scripts/repro/t4-cpu-decoy.sh \
+  --endpoint main=holmesgpt/holmesgpt-holmes \
+  --endpoint raw=holmesgpt-raw/holmesgpt-raw-holmes \
+  --arm full_skill=full@main --arm full_raw=full@raw \
+  --arm symptom_skill=symptom@main --arm symptom_raw=symptom@raw \
+  --rule-id rule-1 --scenario network-congestion --alertname NetworkDoctorNetworkCongestion \
+  --target 4 --flag cpu='runqlat|cpu' --flag loss='retransmit|packet loss|netem'
+bash scripts/repro/holmes-variant.sh down raw
+```
+
+With `--script`, the repro script runs with `ND_HOLD_FILE`, so the fault stays
+while the arms are asked; the node comes from its ground truth. `--fault-min`
+(default 45) caps the fault from the script start: no ask starts after it, a
+running ask is cut at it, and the hold is released. Arms take turns,
+one attempt each per round, until each has `--target` valid answers or
+`--max-attempts` tries. A valid answer has a yaml block, more than 800
+characters and at least 5 tool calls; every ask carries BuildAsk's anti-plan
+line, because without it gpt-luna ended about half of the direct asks with a plan
+and no investigation.
+
+Answers go to `eval/results/ablation-<time>/answers/`, one file per attempt with
+the ask and the answer. `--flag` counts keyword hits and is only a hint: in the
+2026-10 runs the keywords for "separate" and "merged" both matched the same
+answer. Read the answers to decide what each one concluded.
+
+What the 2026-10 runs showed, at 3-4 answers per arm:
+
+- **Context decided the answer.** With a CPU decoy (100% CPU) next to real packet loss, `full` found the loss with and without skills (4/4 and 3/4). `symptom` fell for the decoy with and without skills (0/4 each).
+- **Skills made the checks systematic, not the answers more correct.** With skills, every `full` answer looked up run-queue latency and ruled the decoy out with evidence; without skills, 3 of 4 never looked at CPU.
+- **Grouped alerts were merged too often**, with skills as well: unrelated faults on the same node and minute were described as one cause.
