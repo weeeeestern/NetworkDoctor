@@ -43,6 +43,7 @@ ROOT = os.path.dirname(HERE)
 ARCHS = ["baseline", "derived", "derived+jev"]
 SCRIPT_RULES = {  # repro script -> (expected rule ids, ground-truth template per rule)
     "rule1-congestion.sh": ["rule-1"],
+    "rule1-backend-call.sh": ["rule-1"],
     "rule2-8-nic-drop-policy.sh": ["rule-2", "rule-8"],
     "rule3-5-conntrack-dns.sh": ["rule-3", "rule-5"],
     "rule4-coredns.sh": ["rule-4"],
