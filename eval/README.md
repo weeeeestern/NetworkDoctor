@@ -109,7 +109,9 @@ bash scripts/repro/holmes-variant.sh down raw
 ```
 
 With `--script`, the repro script runs with `ND_HOLD_FILE`, so the fault stays
-while the arms are asked; the node comes from its ground truth. Arms take turns,
+while the arms are asked; the node comes from its ground truth. `--fault-min`
+(default 45) caps the fault from the script start: no ask starts after it, a
+running ask is cut at it, and the hold is released. Arms take turns,
 one attempt each per round, until each has `--target` valid answers or
 `--max-attempts` tries. A valid answer has a yaml block, more than 800
 characters and at least 5 tool calls; every ask carries BuildAsk's anti-plan

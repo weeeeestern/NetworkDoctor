@@ -228,7 +228,9 @@ def main():
     p.add_argument("--symptom", default="", help="operator report used by symptom asks")
     p.add_argument("--script", help="repro script to run and hold while asking (uses ND_HOLD_FILE)")
     p.add_argument("--warmup-min", type=float, default=3, help="minutes to let the fault build before asking")
-    p.add_argument("--fault-min", type=int, default=45, help="max minutes the script keeps the fault")
+    p.add_argument("--fault-min", type=int, default=45,
+                   help="max minutes from the script start: no ask starts after it, a running ask is cut at it, "
+                        "then the hold is released")
     p.add_argument("--target", type=int, default=3, help="valid answers per arm")
     p.add_argument("--max-attempts", type=int, default=7, help="attempts per arm")
     p.add_argument("--model", default="gateway-luna")
@@ -253,10 +255,12 @@ def main():
     proc = hold = None
     endpoints = {}
     started = now() - dt.timedelta(minutes=5)
+    deadline = None  # with --script: the fault must not outlive --fault-min
     try:
         if a.script:
             proc, hold, truth, logf = start_script(a.script, a.fault_min)
             started = now()
+            deadline = time.time() + a.fault_min * 60
             end = time.time() + a.warmup_min * 60
             while time.time() < end:
                 if proc.poll() is not None:
@@ -274,20 +278,26 @@ def main():
             port += 1
 
         with open(os.path.join(out, "attempts.jsonl"), "a") as fh:
-            while True:
+            stop = False
+            while not stop:
                 todo = [arm for arm in arms if arm["valid"] < a.target and arm["attempts"] < a.max_attempts]
                 if not todo:
                     break
                 for arm in todo:  # one attempt per arm per round
                     if proc is not None and proc.poll() is not None:
                         raise SystemExit("repro script ended while asking; the fault is gone")
+                    left = deadline - time.time() if deadline else 900
+                    if left < 60:
+                        log("--fault-min reached; no more asks, releasing the fault")
+                        stop = True
+                        break
                     arm["attempts"] += 1
                     at = now()
                     ask = STYLES[arm["style"]](a, at, started)
                     rec = {"arm": arm["name"], "style": arm["style"], "endpoint": arm["endpoint"],
                            "attempt": arm["attempts"], "asked_at": iso(at)}
                     try:
-                        text, calls, wall = endpoints[arm["endpoint"]].chat(ask, a.model)
+                        text, calls, wall = endpoints[arm["endpoint"]].chat(ask, a.model, timeout_s=min(900, left))
                     except Exception as e:  # keep going; a failed call is just an invalid attempt
                         rec.update(valid=False, error=str(e)[:300])
                         log(f"{arm['name']:14s} #{arm['attempts']} ERROR {e}")
