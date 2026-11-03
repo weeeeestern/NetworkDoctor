@@ -1,0 +1,10 @@
+# cp terraform.tfvars.example terraform.tfvars  (terraform.tfvars is gitignored)
+
+name            = "nd-eks-lab"
+region          = "ap-northeast-2"
+cluster_version = "1.33"
+
+node_instance_types = ["t3.large"]
+node_min            = 1
+node_desired        = 2
+node_max            = 3
