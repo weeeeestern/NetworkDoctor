@@ -13,6 +13,16 @@
 # NOTE: the HTTPS listener has no `tls` block on purpose — the controller does
 # not support `certificateRefs` and takes the cert from LoadBalancerConfiguration
 # instead (and `tls.mode: Terminate` without certificateRefs fails CRD validation).
+#
+# Exposure policy (public demo, no auth in the backend):
+#   - HTTP :80 only redirects to HTTPS (no cleartext serving).
+#   - /webhooks/* and /eval/* are NOT reachable publicly (redirected to /):
+#     Alertmanager posts to the in-cluster Service URL and eval runs are an
+#     operator action, so neither needs internet exposure, and both trigger
+#     paid LLM work if left open.
+#   - Residual risk: the UI's own mutation endpoints (e.g. POST
+#     /incidents/*/holmes) stay public so the demo works. To close that too,
+#     uncomment sourceRanges below and allowlist your IPs.
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: GatewayClass
@@ -30,6 +40,9 @@ metadata:
   namespace: networkdoctor
 spec:
   scheme: internet-facing
+  # Optional IP allowlist for the whole ALB (demo lockdown):
+  # sourceRanges:
+  #   - "203.0.113.0/24"   # e.g. campus / home IP
   listenerConfigurations:
     - protocolPort: HTTPS:443
       defaultCertificate: ACM_CERT_ARN
@@ -60,6 +73,23 @@ spec:
         namespaces:
           from: Same
 ---
+# HTTP :80 — redirect everything to HTTPS; nothing is served in cleartext.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: networkdoctor-redirect
+  namespace: networkdoctor
+spec:
+  parentRefs:
+    - name: networkdoctor
+      sectionName: http
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -68,8 +98,6 @@ metadata:
 spec:
   parentRefs:
     - name: networkdoctor
-      sectionName: http
-    - name: networkdoctor
       sectionName: https
   # external-dns reads this hostname to create the Route53 record. Requests
   # hitting the raw ALB DNS name no longer match this route (404) — use the
@@ -77,7 +105,25 @@ spec:
   hostnames:
     - netdoc.cloud
   rules:
-    # Web UI at / and the API (/incidents, /webhooks/...) — everything goes
+    # Block the write endpoints that must never be public (longest-prefix
+    # match wins over the / rule below): Alertmanager webhooks arrive via the
+    # in-cluster Service, and evals are operator-only. Both spend LLM money
+    # if exposed.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /webhooks
+        - path:
+            type: PathPrefix
+            value: /eval
+      filters:
+        - type: RequestRedirect
+          requestRedirect:
+            path:
+              type: ReplaceFullPath
+              replaceFullPath: /
+            statusCode: 302
+    # Web UI at / and the read API (/incidents, ...) — everything else goes
     # to the backend.
     - matches:
         - path:
