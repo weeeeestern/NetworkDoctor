@@ -1,0 +1,43 @@
+# EKS lab overrides. Pairs with the kube-prometheus-stack that the Argo CD
+# bootstrap (deploy/bootstrap/eks-lab.yaml, app "monitoring") installs as
+# release "monitoring" in the monitoring namespace. The networkdoctor Argo
+# Application in that same bootstrap deploys this chart with this file.
+
+serviceMonitor:
+  enabled: true
+  # kube-prometheus-stack's Prometheus selects monitors/rules by this label.
+  labels:
+    release: monitoring
+
+# Cilium PodMonitor (agent :9962 + Hubble :9965) inherits
+# serviceMonitor.labels; cilium.enabled already defaults to true.
+
+prometheusRule:
+  enabled: true
+  labels:
+    release: monitoring
+
+grafanaDashboards:
+  # The sidecar's upstream default searchNamespace=ALL finds the ConfigMaps
+  # here, and the stack enables the grafana_folder annotation, so dashboards
+  # land in the NetworkDoctor folder.
+  enabled: true
+
+alertmanagerConfig:
+  # Routes source="networkdoctor" alerts to the backend webhook; the stack's
+  # default alertmanagerConfigSelector picks this CR up as-is.
+  enabled: true
+
+backend:
+  config:
+    prometheusURL: http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090
+    # holmesURL: fill in once HolmesGPT is deployed on EKS
+    #   (deploy/helm/holmesgpt), e.g. http://holmesgpt-holmes.networkdoctor.svc:80
+  persistence:
+    # EBS via the aws-ebs-csi-driver addon (Terraform), same gp2 class the
+    # bootstrap gives Prometheus. EKS 1.30+ no longer marks gp2 as the default
+    # class, so name it; an empty storageClass would leave the PVC Pending.
+    # The volume stays in the AZ of the node the backend first lands on.
+    enabled: true
+    storageClass: gp2
+    size: 1Gi
