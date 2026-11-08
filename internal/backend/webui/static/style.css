@@ -110,9 +110,9 @@ body {
 .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 
 .stat-col { display: flex; flex-direction: column; gap: 16px; }
-.card.stat-card { margin-bottom: 0; flex: 1; padding: 18px 20px; display: flex; flex-direction: column; justify-content: center; }
-.stat-k { color: var(--muted); font-size: 13px; }
-.stat-v { font-size: 38px; font-weight: 800; line-height: 1.15; color: var(--text); }
+.card.stat-card { margin-bottom: 0; flex: 1; padding: 16px 20px 18px; display: flex; flex-direction: column; justify-content: space-between; gap: 12px; }
+.stat-k { color: var(--text); font-size: 15px; font-weight: 600; }
+.stat-v { font-size: 40px; font-weight: 800; line-height: 1; color: var(--text); }
 .stat-v.firing { color: var(--red); }
 .stat-of { font-size: 16px; font-weight: 600; color: var(--muted); }
 
