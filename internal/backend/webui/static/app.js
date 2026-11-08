@@ -31,10 +31,10 @@
   const ago = (iso) => {
     if (!iso) return '';
     const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-    if (s < 60) return `${Math.floor(s)}s ago`;
-    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-    return `${Math.floor(s / 86400)}d ago`;
+    if (s < 60) return '방금 전';
+    if (s < 3600) return `${Math.floor(s / 60)}분 전`;
+    if (s < 86400) return `${Math.floor(s / 3600)}시간 전`;
+    return `${Math.floor(s / 86400)}일 전`;
   };
 
   const badge = (text, cls) =>
@@ -99,39 +99,6 @@
       ${bars}</svg>`;
   }
 
-  // Donut with a center total, returns {svg, legend} parts.
-  function donut(parts) {
-    const total = parts.reduce((s, p) => s + p.count, 0);
-    const r = 46, C = 2 * Math.PI * r;
-    let offset = C / 4; // start at 12 o'clock
-    const rings = parts.filter((p) => p.count > 0).map((p) => {
-      const seg = (p.count / total) * C;
-      const el = `<circle cx="60" cy="60" r="${r}" fill="none" stroke="${p.color}" stroke-width="15"
-        stroke-dasharray="${seg - 1.5} ${C - seg + 1.5}" stroke-dashoffset="${offset}"/>`;
-      offset -= seg;
-      return el;
-    }).join('');
-    const svg = `<svg viewBox="0 0 120 120" class="donut-svg">
-      ${total ? rings : `<circle cx="60" cy="60" r="${r}" fill="none" stroke="var(--accent-soft)" stroke-width="15"/>`}
-      <text x="60" y="58" text-anchor="middle" font-size="24" font-weight="700" style="fill:var(--text)">${total}</text>
-      <text x="60" y="74" text-anchor="middle" font-size="9.5" style="fill:var(--muted)">incidents</text></svg>`;
-    const legend = parts.map((p) =>
-      `<div class="legend-item"><span class="dot" style="background:${p.color}"></span>${esc(p.label)}<b>${p.count}</b></div>`
-    ).join('');
-    return { svg, legend };
-  }
-
-  // Horizontal bars, Mixpanel "per category" style.
-  function hbars(entries) {
-    const max = Math.max(1, ...entries.map(([, n]) => n));
-    return entries.map(([label, n]) => `
-      <div class="hbar-row">
-        <span class="hbar-label" title="${esc(label)}">${esc(label)}</span>
-        <span class="hbar-track"><span class="hbar-fill" style="width:${(n / max) * 100}%"></span></span>
-        <span class="hbar-val">${n}</span>
-      </div>`).join('');
-  }
-
   const cardHead = (title, sub) => `
     <div class="card-head">
       <h2 class="card-title">${esc(title)}</h2>
@@ -140,135 +107,144 @@
 
   // ---------- list view ----------
 
+  // Korean display names of the scenario skills (rule_id order).
+  const SCENARIO_KO = {
+    'network-congestion': '네트워크 혼잡',
+    'kernel-network-bottleneck': '커널 네트워크 병목',
+    'conntrack-exhaustion': 'conntrack 고갈',
+    'coredns-degradation': 'CoreDNS 성능 저하',
+    'dns-conntrack-correlation': 'DNS·conntrack 연쇄 장애',
+    'node-localized-failure': '특정 노드 장애',
+    'application-induced-network-bottleneck': '애플리케이션발 네트워크 병목',
+    'networkpolicy-misconfiguration': 'NetworkPolicy 설정 오류',
+  };
+  const scenarioKo = (i) => SCENARIO_KO[i.scenario] || i.scenario || i.rule_id || i.incident_id;
+
+  const CONFIDENCE_KO = { high: ['높음', 'done'], medium: ['보통', 'warning'], low: ['낮음', 'failed'] };
+  const confidenceBadge = (c) => (CONFIDENCE_KO[c] ? badge(`신뢰도 ${CONFIDENCE_KO[c][0]}`, CONFIDENCE_KO[c][1]) : '');
+
+  const STATUS_KO = { firing: '진행 중', resolved: '복구됨' };
+  const statusBadgeKo = (st) => badge(STATUS_KO[st] || st, st === 'firing' ? 'firing' : st === 'resolved' ? 'resolved' : 'neutral');
+
+  // The cause line under the symptom, by investigation state.
+  function causeCell(i) {
+    if (i.holmes_status === 'done' && i.cause) {
+      const prefix = i.investigation_status === 'excluded' ? '이 시나리오 아님: '
+        : i.investigation_status === 'inconclusive' ? '원인 불확실: ' : '';
+      return `<div class="cause-line">→ ${esc(prefix)}${esc(i.cause)}</div>`;
+    }
+    const msg = { queued: '원인 분석 중…', running: '원인 분석 중…', failed: '원인 분석 실패' }[i.holmes_status];
+    return msg ? `<div class="cause-line pending">${msg}</div>` : '';
+  }
+
   async function renderList() {
-    view.innerHTML = '<div class="loading">Loading incidents…</div>';
+    view.innerHTML = '<div class="loading">인시던트를 불러오는 중…</div>';
     let incidents;
     try {
       const data = await getJSON('/incidents');
       incidents = data.incidents || [];
     } catch (err) {
-      view.innerHTML = `<div class="notice err">Failed to load incidents: ${esc(err.message)}</div>`;
+      view.innerHTML = `<div class="notice err">인시던트를 불러오지 못했습니다: ${esc(err.message)}</div>`;
       return;
     }
 
     incidents.sort((a, b) => new Date(b.starts_at) - new Date(a.starts_at));
 
-    const firing = incidents.filter((i) => i.alert_status === 'firing').length;
-    const resolved = incidents.filter((i) => i.alert_status === 'resolved').length;
-    const investigated = incidents.filter((i) => i.holmes_status === 'done').length;
+    // Group members fold under their primary; a member whose primary is not
+    // in the list (e.g. filtered out) stands as its own row.
+    const isMember = (i) => i.correlation_id && i.correlation_id !== i.incident_id;
+    const primaries = incidents.filter((i) => !isMember(i));
+    const primaryIds = new Set(primaries.map((i) => i.incident_id));
+    const members = {};
+    for (const i of incidents) {
+      if (isMember(i) && primaryIds.has(i.correlation_id)) (members[i.correlation_id] ||= []).push(i);
+    }
+    const rowsAll = incidents.filter((i) => !isMember(i) || !primaryIds.has(i.correlation_id));
+
+    const firing = rowsAll.filter((i) => i.alert_status === 'firing').length;
+    const investigated = rowsAll.filter((i) => i.holmes_status === 'done').length;
 
     const filtered = listState.filter === 'all'
-      ? incidents
-      : incidents.filter((i) => i.alert_status === listState.filter);
+      ? rowsAll
+      : rowsAll.filter((i) => i.alert_status === listState.filter);
 
     const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
     listState.page = Math.min(listState.page, pages);
     const start = (listState.page - 1) * PAGE_SIZE;
     const pageItems = filtered.slice(start, start + PAGE_SIZE);
 
-    const rows = pageItems.map((i) => `
+    const rows = pageItems.map((i) => {
+      const group = members[i.incident_id] || [];
+      return `
       <tr data-id="${esc(i.incident_id)}">
+        <td>${statusBadgeKo(i.alert_status)}</td>
         <td>
-          <div class="cell-main">${esc(i.scenario || i.rule_id || i.incident_id)}</div>
-          <div class="cell-sub mono">${esc(i.incident_id)}</div>
+          <div class="cell-main">${esc(i.symptom_summary || scenarioKo(i))}</div>
+          ${causeCell(i)}
+          <div class="cell-sub">${esc(scenarioKo(i))} ${i.holmes_status === 'done' ? confidenceBadge(i.confidence) : ''}</div>
+          ${group.length ? `<div class="group-line">└ 함께 묶인 알림 ${group.length}건: ${esc(group.map((g) => g.symptom_summary || scenarioKo(g)).join(', '))}</div>` : ''}
         </td>
-        <td>${severityBadge(i.severity)}</td>
-        <td>${statusBadge(i.alert_status)}</td>
-        <td>
-          <div>${esc(i.symptom_summary || '-')}</div>
-          <div class="cell-sub">${esc((i.affected_nodes || []).join(', '))}</div>
-        </td>
-        <td>
-          ${holmesBadge(i.holmes_status)}
-          ${i.holmes_total_tokens ? `<div class="cell-sub">${fmtTok(i.holmes_total_tokens)} tok${i.holmes_cost_usd ? ` · ${fmtCost(i.holmes_cost_usd)}` : ''}</div>` : ''}
-        </td>
+        <td>${esc((i.affected_nodes || []).join(', ') || '-')}</td>
         <td>
           <div>${fmtTime(i.starts_at)}</div>
           <div class="cell-sub">${ago(i.starts_at)}</div>
         </td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
 
     const pageBtns = Array.from({ length: pages }, (_, k) => k + 1).map((p) =>
       `<button class="page-btn ${p === listState.page ? 'active' : ''}" data-page="${p}">${p}</button>`
     ).join('');
 
-    const tabs = [['all', 'All'], ['firing', 'Firing'], ['resolved', 'Resolved']].map(([key, label]) =>
+    const tabs = [['all', '전체'], ['firing', '진행 중'], ['resolved', '복구됨']].map(([key, label]) =>
       `<button class="tab ${listState.filter === key ? 'active' : ''}" data-filter="${key}">${label}</button>`
     ).join('');
-
-    const sevDonut = donut([
-      { label: 'critical', count: incidents.filter((i) => i.severity === 'critical').length, color: '#d87070' },
-      { label: 'warning', count: incidents.filter((i) => i.severity === 'warning').length, color: '#cfa14a' },
-      { label: 'other', count: incidents.filter((i) => !['critical', 'warning'].includes(i.severity)).length, color: '#8d9cc9' },
-    ]);
-
-    const nodeCounts = {};
-    for (const i of incidents) for (const n of i.affected_nodes || []) nodeCounts[n] = (nodeCounts[n] || 0) + 1;
-    const topNodes = Object.entries(nodeCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
-
-    const coverage = incidents.length ? Math.round((investigated / incidents.length) * 100) : 0;
 
     view.innerHTML = `
       <div class="page-head">
         <div>
-          <h1 class="page-title">Incidents</h1>
-          <div class="page-sub">Network incidents detected by NetworkDoctor</div>
-        </div>
-      </div>
-
-      <div class="dash-grid">
-        <div class="card chart-card">
-          ${cardHead('Incidents over time', 'last 7 days')}
-          <div class="chart-body">
-            ${barChart(incidents)}
-            <div class="legend legend-row">
-              <div class="legend-item"><span class="dot" style="background:${CHART_NAVY}"></span>firing <b>${firing}</b></div>
-              <div class="legend-item"><span class="dot" style="background:${CHART_LAVENDER}"></span>resolved <b>${resolved}</b></div>
-            </div>
-          </div>
-        </div>
-        <div class="card chart-card">
-          ${cardHead('By severity', '')}
-          <div class="chart-body donut-wrap">
-            ${sevDonut.svg}
-            <div class="legend">${sevDonut.legend}</div>
-          </div>
+          <h1 class="page-title">인시던트</h1>
+          <div class="page-sub">NetworkDoctor가 감지한 네트워크 장애</div>
         </div>
       </div>
 
       <div class="dash-grid dash-grid-rev">
-        <div class="card chart-card">
-          ${cardHead('Investigated', '')}
-          <div class="chart-body kpi-body">
-            <div class="kpi-value">${coverage}%</div>
-            <div class="page-sub">${investigated} of ${incidents.length} incidents have a completed root-cause investigation</div>
+        <div class="stat-col">
+          <div class="card stat-card">
+            <div class="stat-k">진행 중</div>
+            <div class="stat-v ${firing ? 'firing' : ''}">${firing}</div>
+          </div>
+          <div class="card stat-card">
+            <div class="stat-k">원인 분석 완료</div>
+            <div class="stat-v">${investigated}<span class="stat-of"> / ${rowsAll.length}</span></div>
           </div>
         </div>
         <div class="card chart-card">
-          ${cardHead('Affected nodes', `top ${topNodes.length}`)}
+          ${cardHead('최근 7일 현황', '')}
           <div class="chart-body">
-            ${topNodes.length ? hbars(topNodes) : '<div class="page-sub">no node data</div>'}
+            ${barChart(rowsAll)}
+            <div class="legend legend-row">
+              <div class="legend-item"><span class="dot" style="background:${CHART_NAVY}"></span>진행 중</div>
+              <div class="legend-item"><span class="dot" style="background:${CHART_LAVENDER}"></span>복구됨</div>
+            </div>
           </div>
         </div>
       </div>
 
       <div class="card">
         <div class="card-head">
-          <h2 class="card-title">Incident list</h2>
+          <h2 class="card-title">인시던트 목록</h2>
           <div class="tabs">${tabs}</div>
         </div>
-        ${filtered.length === 0 ? '<div class="empty">No incidents</div>' : `
-        <table>
+        ${filtered.length === 0 ? '<div class="empty">인시던트가 없습니다</div>' : `
+        <table class="incident-table">
           <thead>
-            <tr>
-              <th>Incident</th><th>Severity</th><th>Status</th>
-              <th>Symptom</th><th>Investigation</th><th>Started</th>
-            </tr>
+            <tr><th>상태</th><th>증상 → 추정 원인</th><th>노드</th><th>발생</th></tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>
         <div class="pagination">
-          <span class="page-info">${start + 1}–${start + pageItems.length} of ${filtered.length}</span>
+          <span class="page-info">${filtered.length}건 중 ${start + 1}–${start + pageItems.length}</span>
           <div class="page-btns">
             <button class="page-btn" data-page="${listState.page - 1}" ${listState.page <= 1 ? 'disabled' : ''}>‹</button>
             ${pageBtns}

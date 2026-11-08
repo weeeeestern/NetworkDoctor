@@ -259,6 +259,23 @@ type IncidentSummary struct {
 	HolmesTokens   int        `json:"holmes_total_tokens,omitempty"`
 	HolmesCostUSD  float64    `json:"holmes_cost_usd,omitempty"`
 	CorrelationID  string     `json:"correlation_id,omitempty"`
+	// Cause, Confidence and InvestigationStatus come from the Holmes result
+	// so the list can show "symptom -> likely cause" without a detail fetch.
+	Cause               string `json:"cause,omitempty"`
+	Confidence          string `json:"confidence,omitempty"`
+	InvestigationStatus string `json:"investigation_status,omitempty"`
+}
+
+// listCause is the one-line cause for the list: the skill's summary.cause
+// when present, otherwise the root_cause sentence(s).
+func listCause(r map[string]any) string {
+	if s, ok := r["summary"].(map[string]any); ok {
+		if c, ok := s["cause"].(string); ok && c != "" {
+			return c
+		}
+	}
+	c, _ := r["root_cause"].(string)
+	return c
 }
 
 func (h *handler) listIncidents(w http.ResponseWriter, r *http.Request) {
@@ -274,6 +291,9 @@ func (h *handler) listIncidents(w http.ResponseWriter, r *http.Request) {
 		if statusFilter != "" && inc.AlertStatus != statusFilter {
 			continue
 		}
+		res := inc.HolmesResult
+		conf, _ := res["confidence"].(string)
+		st, _ := res["investigation_status"].(string)
 		out = append(out, IncidentSummary{
 			IncidentID:     inc.IncidentID,
 			AlertStatus:    inc.AlertStatus,
@@ -290,6 +310,10 @@ func (h *handler) listIncidents(w http.ResponseWriter, r *http.Request) {
 			HolmesTokens:   inc.HolmesTotalTokens,
 			HolmesCostUSD:  inc.HolmesCostUSD,
 			CorrelationID:  inc.CorrelationID,
+
+			Cause:               listCause(res),
+			Confidence:          conf,
+			InvestigationStatus: st,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"incidents": out, "count": len(out)})

@@ -283,3 +283,27 @@ func TestWebhookEnqueuesOnlyNewFiringIncidents(t *testing.T) {
 		t.Fatalf("enqueued %d times, want 1: %v", len(inv.ids), inv.ids)
 	}
 }
+
+func TestListCause(t *testing.T) {
+	cases := []struct {
+		name string
+		r    map[string]any
+		want string
+	}{
+		{"nil result", nil, ""},
+		{"root_cause only", map[string]any{"root_cause": "worker1 link congestion"}, "worker1 link congestion"},
+		{"summary wins", map[string]any{
+			"root_cause": "long paragraph",
+			"summary":    map[string]any{"cause": "worker1 NIC 혼잡"},
+		}, "worker1 NIC 혼잡"},
+		{"empty summary falls back", map[string]any{
+			"root_cause": "long paragraph",
+			"summary":    map[string]any{"cause": ""},
+		}, "long paragraph"},
+	}
+	for _, c := range cases {
+		if got := listCause(c.r); got != c.want {
+			t.Errorf("%s: listCause = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
