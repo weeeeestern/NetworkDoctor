@@ -3,6 +3,17 @@
 global:
   clusterName: onprem-lab
 
+# Set actual browser-accessible origins before the demo. Do not use .svc URLs.
+grafana:
+  url: ""
+ui:
+  url: ""
+slack:
+  enabled: false
+  channelID: ""
+  existingSecret: ""
+  botTokenKey: bot-token
+
 agent:
   # Verified via node-exporter node_network_up: all three workers use eno1 (1 GbE).
   # The control plane VM uses ens18 and is tainted node-role.kubernetes.io/control-plane.

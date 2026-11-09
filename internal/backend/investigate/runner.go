@@ -8,6 +8,7 @@ package investigate
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -24,6 +25,42 @@ type Store interface {
 	Get(id string) (*incident.Incident, error)
 	Update(id string, mutate func(*incident.Incident) error) (*incident.Incident, error)
 	Members(primaryID string) ([]*incident.Incident, error)
+}
+
+// MarkInterrupted runs before workers start in the single-writer backend.
+// It keeps prior results while making an interrupted attempt retryable by a user.
+func MarkInterrupted(store interface {
+	List() ([]*incident.Incident, error)
+	Update(string, func(*incident.Incident) error) (*incident.Incident, error)
+}) (int, error) {
+	all, err := store.List()
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, inc := range all {
+		if inc.HolmesStatus != "running" {
+			continue
+		}
+		changed := false
+		_, err := store.Update(inc.IncidentID, func(i *incident.Incident) error {
+			if i.HolmesStatus != "running" {
+				return incident.ErrNoChange
+			}
+			i.HolmesStatus = "failed"
+			i.HolmesError = "Analysis interrupted by backend restart; reanalyze manually."
+			i.UpdatedAt = time.Now().UTC()
+			changed = true
+			return nil
+		})
+		if err != nil {
+			return count, fmt.Errorf("mark interrupted %s: %w", inc.IncidentID, err)
+		}
+		if changed {
+			count++
+		}
+	}
+	return count, nil
 }
 
 // Asker is the subset of holmes.Client the runner needs.
@@ -165,7 +202,11 @@ func (r *Runner) run(ctx context.Context, j job) {
 	now := r.o.Now().UTC()
 
 	// Claim the incident: decide under the store lock whether to run.
+	claimed := false
 	inc, err := r.o.Store.Update(j.id, func(inc *incident.Incident) error {
+		if inc.HolmesStatus == "running" {
+			return incident.ErrNoChange
+		}
 		if !j.force {
 			if inc.HolmesAttempts > 0 || inc.HolmesStatus == "running" {
 				return incident.ErrNoChange
@@ -181,13 +222,14 @@ func (r *Runner) run(ctx context.Context, j job) {
 		inc.HolmesAttempts++
 		inc.HolmesModel = r.o.Model
 		inc.HolmesLastAt = &now
+		claimed = true
 		return nil
 	})
 	if err != nil {
 		r.o.Logger.Printf("investigate %s: claim failed: %v", j.id, err)
 		return
 	}
-	if inc.HolmesStatus != "running" {
+	if !claimed || inc.HolmesStatus != "running" {
 		return
 	}
 
@@ -283,7 +325,7 @@ func applyResult(i *incident.Incident, r map[string]any) {
 // investigation. A finished or running own investigation is left alone.
 func (r *Runner) markGrouped(id, primary string) {
 	_, err := r.o.Store.Update(id, func(i *incident.Incident) error {
-		if i.HolmesStatus == "done" || i.HolmesStatus == "running" || i.HolmesStatus == "grouped" {
+		if i.HolmesAttempts > 0 || i.HolmesResult != nil || i.HolmesStatus == "done" || i.HolmesStatus == "running" || i.HolmesStatus == "grouped" {
 			return incident.ErrNoChange
 		}
 		i.HolmesStatus = "grouped"
