@@ -1,5 +1,7 @@
 # Slack incident demo
 
+For Korean setup instructions, see [Slack integration guide (한국어)](slack-integration.ko.md).
+
 This demo uses one Slack parent message per individual incident, even when
 Holmes investigates several incidents as a group. Analysis completion appears
 in that incident's thread. Grafana shows metrics; the Incident UI explains the
