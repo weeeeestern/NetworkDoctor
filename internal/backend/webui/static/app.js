@@ -418,6 +418,7 @@
       : (inc.correlated_incidents || []).length
         ? `primary of ${inc.correlated_incidents.map(incidentLink).join(', ')}`
         : '';
+    const technicalDetailsOpen = polling && Boolean(view.querySelector('details')?.open);
 
     view.innerHTML = `
       <a class="back-link" href="#/">← Incidents</a>
@@ -443,7 +444,7 @@
 
       ${rootCauseCard(inc, analysis)}
 
-      <details>
+      <details${technicalDetailsOpen ? ' open' : ''}>
       <summary class="section-sub">Technical details</summary>
       <div class="card">
         <div class="card-head"><h2 class="card-title">Incident information</h2></div>
