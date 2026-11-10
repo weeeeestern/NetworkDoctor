@@ -273,6 +273,58 @@
 
   // ---------- detail view ----------
 
+  let detailPollTimer;
+  let detailID = null;
+  let requestedAnalysis = null;
+
+  const analysisFor = (inc) => inc.analysis || {
+    source_incident_id: inc.incident_id,
+    source_holmes_status: inc.holmes_status,
+    previous: Boolean(inc.holmes_result && ['queued', 'running', 'failed'].includes(inc.holmes_status)),
+    result: inc.holmes_result,
+  };
+
+  const safeHTTPURL = (value) => {
+    if (typeof value !== 'string') return '';
+    try {
+      const url = new URL(value);
+      return ['https:', 'http:'].includes(url.protocol) ? url.href : '';
+    } catch (_) { return ''; }
+  };
+
+  const incidentLink = (id) => `<a href="#/incident/${esc(encodeURIComponent(id))}" class="mono">${esc(id)}</a>`;
+
+  function analysisCaption(analysis) {
+    return analysis.shared
+      ? `<p class="page-sub">Related group analysis · source ${incidentLink(analysis.source_incident_id)}</p>`
+      : '';
+  }
+
+  function diagnosisSummary(inc, analysis) {
+    const r = analysis.result;
+    const cause = r && ((r.summary && r.summary.cause) || r.root_cause);
+    const state = analysis.source_holmes_status || 'not run';
+    const conclusion = r && r.investigation_status;
+    const label = conclusion === 'excluded' ? 'Scenario excluded'
+      : conclusion === 'inconclusive' ? 'Cause inconclusive'
+      : conclusion === 'confirmed' ? 'Cause confirmed' : 'Analysis result';
+    const pending = analysis.unavailable ? 'Related group analysis unavailable.'
+      : ({queued: 'Analysis queued.', running: 'Analysis in progress.', failed: 'Analysis failed.', skipped: 'Analysis not run.'}[state] || 'No analysis result yet.');
+    return `<div class="card">
+      <div class="card-head"><h2 class="card-title">Symptom → cause</h2></div>
+      <div class="card-body">
+        <div class="section-sub">Symptom</div><div class="rc-text">${esc(inc.symptom_summary || inc.scenario || '-')}</div>
+        <div class="rc-stats">
+          ${rcStat('Occurred', fmtTime(inc.starts_at))}
+          ${rcStat('Analysis', state)}
+          ${r && r.confidence ? rcStat('Confidence', r.confidence, confidenceCls(r.confidence)) : ''}
+        </div>
+        ${analysisCaption(analysis)}
+        ${cause ? `<div class="section-sub">${analysis.previous ? 'Previous analysis · ' : ''}${esc(label)}</div><div class="rc-text">${esc(cause)}</div>` : `<p class="page-sub">${esc(pending)}</p>`}
+        ${analysis.previous ? `<p class="page-sub">Current analysis is ${esc(state)}. The earlier finding is shown until a new result is available.</p>` : ''}
+      </div></div>`;
+  }
+
   const holmesList = (title, items) => {
     if (!Array.isArray(items) || items.length === 0) return '';
     const lis = items.map((it) => {
@@ -297,27 +349,25 @@
   const confidenceCls = (c) =>
     c === 'high' ? 'good' : c === 'medium' ? 'warn' : c === 'low' ? 'bad' : '';
 
-  function rootCauseCard(inc) {
-    const r = inc.holmes_result;
+  function rootCauseCard(inc, analysis) {
+    const r = analysis.result;
     if (!r) {
-      const msg = inc.holmes_error
+      const msg = analysis.unavailable
+        ? '<p class="page-sub">Related group analysis unavailable.</p>'
+        : !analysis.shared && inc.holmes_error
         ? `<div class="notice err">Investigation failed: ${esc(inc.holmes_error)}</div>`
-        : `<p class="page-sub">No investigation result yet (status: ${esc(inc.holmes_status || 'not run')}).</p>`;
+        : `<p class="page-sub">No investigation result yet (status: ${esc(analysis.source_holmes_status || 'not run')}).</p>`;
       return `<div class="card"><div class="card-head"><h2 class="card-title">Root cause</h2></div>
         <div class="card-body">${msg}</div></div>`;
     }
     const st = r.investigation_status;
     return `
       <div class="card">
-        <div class="card-head"><h2 class="card-title">Root cause</h2></div>
+        <div class="card-head"><h2 class="card-title">${analysis.previous ? 'Previous analysis' : 'Analysis details'}</h2></div>
         <div class="card-body">
           <div class="rc-stats">
             ${st ? rcStat('status', st, st === 'confirmed' ? 'good' : st === 'excluded' ? 'warn' : '') : ''}
             ${r.confidence ? rcStat('confidence', r.confidence, confidenceCls(r.confidence)) : ''}
-            ${inc.holmes_model ? rcStat('model', inc.holmes_model) : ''}
-            ${inc.holmes_tool_calls ? rcStat('tool calls', inc.holmes_tool_calls) : ''}
-            ${inc.holmes_total_tokens ? rcStat('tokens', fmtTok(inc.holmes_total_tokens), '', `${fmtTok(inc.holmes_prompt_tokens || 0)} in · ${fmtTok(inc.holmes_completion_tokens || 0)} out`) : ''}
-            ${inc.holmes_cost_usd ? rcStat('cost', fmtCost(inc.holmes_cost_usd)) : ''}
           </div>
           <div class="rc-text">${esc(String(r.root_cause || '').trim())}</div>
           ${holmesList('Trigger evidence', r.trigger_evidence)}
@@ -329,27 +379,46 @@
       </div>`;
   }
 
-  async function renderDetail(id) {
-    view.innerHTML = '<div class="loading">Loading incident…</div>';
+  async function renderDetail(id, polling = false) {
+    clearTimeout(detailPollTimer);
+    if (!polling) view.innerHTML = '<div class="loading">Loading incident…</div>';
     let inc;
     try {
       inc = await getJSON(`/incidents/${encodeURIComponent(id)}`);
     } catch (err) {
+      if (detailID !== id) return;
+      if (polling) {
+        const flash = document.getElementById('flash');
+        if (flash) flash.innerHTML = `<div class="notice err">Could not refresh analysis: ${esc(err.message)}. Retrying…</div>`;
+        detailPollTimer = setTimeout(() => { if (detailID === id) renderDetail(id, true); }, 2500);
+        return;
+      }
       view.innerHTML = `
         <a class="back-link" href="#/">← Incidents</a>
         <div class="notice err">Failed to load incident: ${esc(err.message)}</div>`;
       return;
     }
 
+    if (detailID !== id) return;
+    if (requestedAnalysis && requestedAnalysis.id === id &&
+        ((inc.holmes_attempts || 0) > requestedAnalysis.attempt || ['queued', 'running'].includes(inc.holmes_status))) {
+      requestedAnalysis = null;
+    }
+    const waitingToStart = requestedAnalysis && requestedAnalysis.id === id;
+    const analysis = analysisFor(inc);
+    const grafanaURL = safeHTTPURL(inc.links && inc.links.grafana);
+    const sourceURL = safeHTTPURL(inc.generator_url);
+
     const title = (inc.alert_labels && inc.alert_labels.alertname) || inc.scenario || inc.incident_id;
     const labels = Object.entries(inc.alert_labels || {}).sort(([a], [b]) => a.localeCompare(b));
     const evidences = inc.evidence_metrics || [];
 
     const correlation = inc.correlation_id && inc.correlation_id !== inc.incident_id
-      ? `grouped into <a href="#/incident/${esc(inc.correlation_id)}" class="mono">${esc(inc.correlation_id)}</a>`
+      ? `grouped into ${incidentLink(inc.correlation_id)}`
       : (inc.correlated_incidents || []).length
-        ? `primary of ${inc.correlated_incidents.map((c) => `<a href="#/incident/${esc(c)}" class="mono">${esc(c)}</a>`).join(', ')}`
+        ? `primary of ${inc.correlated_incidents.map(incidentLink).join(', ')}`
         : '';
+    const technicalDetailsOpen = polling && Boolean(view.querySelector('details')?.open);
 
     view.innerHTML = `
       <a class="back-link" href="#/">← Incidents</a>
@@ -359,21 +428,29 @@
           <div class="badge-row">
             ${severityBadge(inc.severity)}
             ${statusBadge(inc.alert_status)}
-            ${holmesBadge(inc.holmes_status)}
+            ${holmesBadge(analysis.source_holmes_status)}
             <span class="page-sub mono">${esc(inc.incident_id)}</span>
           </div>
         </div>
         <div class="btn-row">
           <button class="btn primary" id="btn-pdf">Download PDF</button>
-          <a class="btn" href="/incidents/${encodeURIComponent(inc.incident_id)}/report.md" target="_blank">Markdown</a>
-          <button class="btn" id="btn-holmes">Re-investigate</button>
+          ${grafanaURL ? `<a class="btn" href="${esc(grafanaURL)}" target="_blank" rel="noopener noreferrer">View in Grafana</a>` : ''}
+          <button class="btn" id="btn-holmes" ${waitingToStart ? 'disabled' : ''}>Reanalyze</button>
         </div>
       </div>
-      <div id="flash"></div>
+      <div id="flash">${waitingToStart ? '<div class="notice ok">Reanalysis queued. Waiting to start…</div>' : ''}</div>
 
+      ${diagnosisSummary(inc, analysis)}
+
+      ${rootCauseCard(inc, analysis)}
+
+      <details${technicalDetailsOpen ? ' open' : ''}>
+      <summary class="section-sub">Technical details</summary>
       <div class="card">
-        <div class="card-head"><h2 class="card-title">Overview</h2></div>
+        <div class="card-head"><h2 class="card-title">Incident information</h2></div>
         <div class="card-body">
+          <p><a class="btn" href="/incidents/${esc(encodeURIComponent(inc.incident_id))}/report.md" target="_blank" rel="noopener noreferrer">Markdown report</a>
+          ${sourceURL ? `<a class="btn" href="${esc(sourceURL)}" target="_blank" rel="noopener noreferrer">Source query</a>` : ''}</p>
           <div class="meta-grid">
             <div class="meta-item"><div class="k">Rule / scenario</div><div class="v">${esc(inc.rule_id || '-')} / ${esc(inc.scenario || '-')}</div></div>
             <div class="meta-item"><div class="k">Cluster</div><div class="v">${esc(inc.cluster || '-')}</div></div>
@@ -382,14 +459,19 @@
             <div class="meta-item"><div class="k">Nodes</div><div class="v">${esc((inc.affected_nodes || []).join(', ') || '-')}</div></div>
             <div class="meta-item"><div class="k">Services</div><div class="v">${esc((inc.affected_services || []).join(', ') || '-')}</div></div>
             <div class="meta-item"><div class="k">Recovery</div><div class="v">${esc(inc.recovery_status || '-')}</div></div>
-            <div class="meta-item"><div class="k">Deliveries</div><div class="v">${inc.delivery_count ?? '-'}</div></div>
+            <div class="meta-item"><div class="k">Deliveries</div><div class="v">${esc(inc.delivery_count ?? '-')}</div></div>
+            <div class="meta-item"><div class="k">This incident's investigation</div><div class="v">${esc(inc.holmes_status || 'not run')}</div></div>
             ${correlation ? `<div class="meta-item"><div class="k">Correlation</div><div class="v">${correlation}</div></div>` : ''}
           </div>
-          ${inc.symptom_summary ? `<p style="margin:14px 0 0">${esc(inc.symptom_summary)}</p>` : ''}
+          <div class="rc-stats">
+            ${inc.holmes_model ? rcStat('Model', inc.holmes_model) : ''}
+            ${inc.holmes_tool_calls ? rcStat('Tool calls', inc.holmes_tool_calls) : ''}
+            ${inc.holmes_total_tokens ? rcStat('Tokens', fmtTok(inc.holmes_total_tokens), '', `${fmtTok(inc.holmes_prompt_tokens || 0)} in · ${fmtTok(inc.holmes_completion_tokens || 0)} out`) : ''}
+            ${inc.holmes_cost_usd ? rcStat('Cost', fmtCost(inc.holmes_cost_usd)) : ''}
+          </div>
+          ${inc.holmes_error ? `<p class="notice err">${esc(inc.holmes_error)}</p>` : ''}
         </div>
       </div>
-
-      ${rootCauseCard(inc)}
 
       ${evidences.length ? `
       <div class="card">
@@ -411,13 +493,18 @@
             ${labels.map(([k, v]) => `<tr><td class="mono">${esc(k)}</td><td class="mono">${esc(v)}</td></tr>`).join('')}
           </tbody>
         </table>
-      </div>` : ''}`;
+      </div>` : ''}
+      </details>`;
 
     document.getElementById('btn-pdf').addEventListener('click', () => downloadPDF(inc));
-    document.getElementById('btn-holmes').addEventListener('click', () => reinvestigate(inc.incident_id));
+    document.getElementById('btn-holmes').addEventListener('click', () => reinvestigate(inc));
+    if (waitingToStart || ['queued', 'running'].includes(analysis.source_holmes_status)) {
+      detailPollTimer = setTimeout(() => { if (detailID === id) renderDetail(id, true); }, 2500);
+    }
   }
 
-  async function reinvestigate(id) {
+  async function reinvestigate(inc) {
+    const id = inc.incident_id;
     const flash = document.getElementById('flash');
     const btn = document.getElementById('btn-holmes');
     btn.disabled = true;
@@ -425,7 +512,10 @@
       const res = await fetch(`/incidents/${encodeURIComponent(id)}/holmes`, { method: 'POST' });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || res.statusText);
-      flash.innerHTML = '<div class="notice ok">Investigation queued. Refresh in a bit to see the result.</div>';
+      if (detailID === id) {
+        requestedAnalysis = { id, attempt: inc.holmes_attempts || 0 };
+        await renderDetail(id);
+      }
     } catch (err) {
       flash.innerHTML = `<div class="notice err">${esc(err.message)}</div>`;
     } finally {
@@ -459,7 +549,7 @@
         image: { type: 'jpeg', quality: 0.95 },
         html2canvas: { scale: 2, useCORS: true },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
+        pagebreak: { mode: ['css', 'legacy'] },
       }).from(root).save();
     } catch (err) {
       flash.innerHTML = `<div class="notice err">PDF generation failed: ${esc(err.message)}</div>`;
@@ -475,9 +565,12 @@
   // ---------- router ----------
 
   function route() {
+    clearTimeout(detailPollTimer);
     const hash = location.hash || '#/';
     const m = hash.match(/^#\/incident\/(.+)$/);
-    if (m) renderDetail(decodeURIComponent(m[1]));
+    detailID = m ? decodeURIComponent(m[1]) : null;
+    if (requestedAnalysis && requestedAnalysis.id !== detailID) requestedAnalysis = null;
+    if (m) renderDetail(detailID);
     else renderList();
     window.scrollTo(0, 0);
   }

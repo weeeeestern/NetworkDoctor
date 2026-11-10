@@ -66,6 +66,113 @@ func waitStatus(t *testing.T, store *incident.FileStore, id string, want ...stri
 	return nil
 }
 
+func TestMarkInterruptedPreservesPreviousResultAndAllowsManualRetry(t *testing.T) {
+	store, _ := incident.NewFileStore(t.TempDir())
+	inc := newIncident(t, store, "rule-1")
+	_, err := store.Update(inc.IncidentID, func(i *incident.Incident) error {
+		i.HolmesStatus = "running"
+		i.HolmesAttempts = 2
+		i.HolmesResult = map[string]any{"root_cause": "Previous observed cause"}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := investigate.MarkInterrupted(store)
+	if err != nil || n != 1 {
+		t.Fatalf("interrupted=%d err=%v", n, err)
+	}
+	got, _ := store.Get(inc.IncidentID)
+	if got.HolmesStatus != "failed" || !strings.Contains(got.HolmesError, "interrupted") || got.HolmesAttempts != 2 || got.HolmesResult["root_cause"] != "Previous observed cause" {
+		t.Fatalf("interruption lost state: %+v", got)
+	}
+	if n, err := investigate.MarkInterrupted(store); err != nil || n != 0 {
+		t.Fatalf("second scan=%d %v", n, err)
+	}
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"analysis": holmesAnswer})
+	}))
+	defer hs.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := investigate.New(ctx, investigate.Options{Store: store, Holmes: holmes.New(hs.URL, "", time.Second)})
+	if err := r.Enqueue(inc.IncidentID, true); err != nil {
+		t.Fatal(err)
+	}
+	got = waitStatus(t, store, inc.IncidentID, "done")
+	if got.HolmesAttempts != 3 || got.HolmesResult["root_cause"] == "Previous observed cause" {
+		t.Fatalf("manual retry did not replace prior result: %+v", got)
+	}
+}
+
+func TestAutomaticJobDoesNotRunWithoutWinningClaim(t *testing.T) {
+	store, _ := incident.NewFileStore(t.TempDir())
+	busy := newIncident(t, store, "rule-1")
+	probe := newIncident(t, store, "rule-2")
+	_, _ = store.Update(busy.IncidentID, func(i *incident.Incident) error {
+		i.HolmesStatus = "running"
+		i.HolmesAttempts = 1
+		return nil
+	})
+	var calls atomic.Int32
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_ = json.NewEncoder(w).Encode(map[string]any{"analysis": holmesAnswer})
+	}))
+	defer hs.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := investigate.New(ctx, investigate.Options{Store: store, Holmes: holmes.New(hs.URL, "", time.Second), Workers: 1})
+	if err := r.Enqueue(busy.IncidentID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Enqueue(probe.IncidentID, false); err != nil {
+		t.Fatal(err)
+	}
+	// The probe completing proves the earlier job was handled by the single worker.
+	waitStatus(t, store, probe.IncidentID, "done")
+	if calls.Load() != 1 {
+		t.Fatalf("Holmes calls=%d, busy job ran without a claim", calls.Load())
+	}
+	got, _ := store.Get(busy.IncidentID)
+	if got.HolmesStatus != "running" || got.HolmesAttempts != 1 {
+		t.Fatalf("busy job changed: %+v", got)
+	}
+}
+
+func TestGroupInvestigationPreservesMembersIndependentFailure(t *testing.T) {
+	store, _ := incident.NewFileStore(t.TempDir())
+	primary := newIncident(t, store, "rule-3")
+	member := newIncident(t, store, "rule-5")
+	if _, err := store.Correlate(primary.IncidentID, 10*time.Minute, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Correlate(member.IncidentID, 10*time.Minute, nil); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = store.Update(member.IncidentID, func(i *incident.Incident) error {
+		i.HolmesStatus = "failed"
+		i.HolmesAttempts = 1
+		i.HolmesError = "Independent analysis failed"
+		return nil
+	})
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"analysis": holmesAnswer})
+	}))
+	defer hs.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := investigate.New(ctx, investigate.Options{Store: store, Holmes: holmes.New(hs.URL, "", time.Second)})
+	if err := r.Enqueue(primary.IncidentID, true); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, store, primary.IncidentID, "done")
+	got, _ := store.Get(member.IncidentID)
+	if got.HolmesStatus != "failed" || got.HolmesError != "Independent analysis failed" {
+		t.Fatalf("independent result overwritten: %+v", got)
+	}
+}
+
 func TestRunnerCollectsEvidenceAsksHolmesOnceAndParses(t *testing.T) {
 	prom := fakeProm(t)
 	defer prom.Close()

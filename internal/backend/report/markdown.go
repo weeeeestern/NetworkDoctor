@@ -12,7 +12,17 @@ import (
 
 // Markdown renders one incident.
 func Markdown(inc *incident.Incident) string {
+	return MarkdownWithResult(inc, incident.ResolveResult(inc, nil))
+}
+
+// MarkdownWithResult uses the selected diagnosis while keeping the requested
+// incident's identity, symptom, alert status and affected resources.
+func MarkdownWithResult(inc *incident.Incident, view incident.ResultView) string {
 	var b strings.Builder
+	source := view.Source
+	if source == nil {
+		source = inc
+	}
 	title := firstNonEmpty(inc.AlertLabels["alertname"], inc.Scenario, inc.IncidentID)
 	fmt.Fprintf(&b, "# %s\n\n", title)
 	fmt.Fprintf(&b, "_%s · %s · generated %s_\n\n", inc.IncidentID, inc.Cluster, time.Now().UTC().Format(time.RFC3339))
@@ -28,17 +38,28 @@ func Markdown(inc *incident.Incident) string {
 	row(&b, "Nodes", strings.Join(inc.AffectedNodes, ", "))
 	row(&b, "Services", strings.Join(inc.AffectedServices, ", "))
 	row(&b, "Summary", inc.SymptomSummary)
-	row(&b, "Investigation", holmesLine(inc))
+	if view.Unavailable {
+		row(&b, "Investigation", "Related group analysis unavailable")
+	} else {
+		row(&b, "Investigation", holmesLine(source))
+	}
 	if inc.IsGroupMember() {
-		row(&b, "Correlation", "grouped into "+inc.CorrelationID+" (see its report)")
+		row(&b, "Correlation", "grouped into "+inc.CorrelationID)
 	} else if len(inc.CorrelatedIncidents) > 0 {
 		row(&b, "Correlation", "primary of "+strings.Join(inc.CorrelatedIncidents, ", "))
 	}
 	b.WriteString("\n")
+	if view.Shared {
+		fmt.Fprintf(&b, "Related group analysis · source incident `%s`.\n\n", view.SourceIncidentID)
+	}
 
-	r := inc.HolmesResult
+	r := view.Result
 	if r != nil {
-		b.WriteString("## Root cause\n\n")
+		if view.Previous {
+			fmt.Fprintf(&b, "## Previous analysis\n\nRetained from an earlier attempt; current investigation is %s.\n\n", view.SourceHolmesStatus)
+		} else {
+			b.WriteString("## Root cause\n\n")
+		}
 		fmt.Fprintf(&b, "**%s** · confidence **%s**\n\n", str(r["investigation_status"]), str(r["confidence"]))
 		fmt.Fprintf(&b, "%s\n\n", strings.TrimSpace(str(r["root_cause"])))
 		section(&b, "Trigger evidence", r["trigger_evidence"])
@@ -46,13 +67,13 @@ func Markdown(inc *incident.Incident) string {
 		section(&b, "Excluded alternatives", r["excluded_alternatives"])
 		section(&b, "Recommended actions", r["recommended_actions"])
 		section(&b, "Additional checks", r["additional_checks"])
-	} else if inc.HolmesError != "" {
-		fmt.Fprintf(&b, "## Root cause\n\nNot available: %s\n\n", inc.HolmesError)
+	} else if source.HolmesError != "" {
+		fmt.Fprintf(&b, "## Root cause\n\nNot available: %s\n\n", source.HolmesError)
 	}
 
-	if len(inc.EvidenceMetrics) > 0 {
+	if !view.Unavailable && len(source.EvidenceMetrics) > 0 {
 		b.WriteString("## Evidence collected by NetworkDoctor\n\n")
-		for _, e := range inc.EvidenceMetrics {
+		for _, e := range source.EvidenceMetrics {
 			fmt.Fprintf(&b, "- **%s**: %s\n  `%s`\n", e.Metric, e.Observation, e.Query)
 		}
 		b.WriteString("\n")

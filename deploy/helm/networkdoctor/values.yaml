@@ -6,6 +6,19 @@
 nameOverride: ""
 fullnameOverride: ""
 
+# Browser-accessible addresses, not Kubernetes Service URLs.
+# Empty values hide the corresponding external links.
+grafana:
+  url: ""
+ui:
+  url: ""
+
+slack:
+  enabled: false
+  channelID: ""
+  existingSecret: ""
+  botTokenKey: bot-token
+
 global:
   # Stamped into every incident by the backend (ND_CLUSTER_NAME).
   clusterName: onprem-lab

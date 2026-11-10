@@ -186,6 +186,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .incident-table td:nth-child(3) { width: 140px; }
 .incident-table td:last-child { width: 170px; white-space: nowrap; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+a.mono { color: var(--text); text-underline-offset: 3px; }
 
 .empty {
   padding: 48px 20px;
@@ -366,7 +367,9 @@ ul.plain li { margin-bottom: 4px; }
 
 .pdf-doc {
   display: none;
-  width: 760px;
+  /* Fit html2pdf's narrower A4 capture container instead of cropping its right edge. */
+  width: 100%;
+  max-width: 760px;
   background: #fff;
   color: #1f2430;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, "Apple SD Gothic Neo", sans-serif;
@@ -377,10 +380,14 @@ ul.plain li { margin-bottom: 4px; }
 .pdf-doc h1 { font-size: 21px; border-bottom: 3px solid #001466; padding-bottom: 8px; margin: 0 0 10px; }
 .pdf-doc h2 { font-size: 15px; color: #001466; margin: 22px 0 8px; }
 .pdf-doc h3 { font-size: 13px; margin: 14px 0 6px; }
+.pdf-doc h1, .pdf-doc h2, .pdf-doc h3 { break-after: avoid; page-break-after: avoid; }
+.pdf-doc li, .pdf-doc tr { break-inside: avoid; page-break-inside: avoid; }
 .pdf-doc table { width: 100%; border-collapse: collapse; margin: 10px 0; }
 .pdf-doc th, .pdf-doc td { border: 1px solid #e5e7eb; padding: 6px 9px; text-align: left; font-size: 12px; }
 .pdf-doc th { background: #e9ecf4; }
-.pdf-doc code { background: #f3f4f6; border-radius: 4px; padding: 1px 4px; font-size: 11px; font-family: ui-monospace, Menlo, monospace; word-break: break-all; }
+/* html2canvas paints wrapped inline-code backgrounds over preceding text.
+   Keep PDF code transparent so evidence names and observations stay visible. */
+.pdf-doc code { background: transparent; border-radius: 4px; padding: 1px 4px; font-size: 11px; font-family: ui-monospace, Menlo, monospace; word-break: break-all; }
 .pdf-doc li { margin-bottom: 3px; }
 .pdf-doc em { color: #6b7280; }
 
