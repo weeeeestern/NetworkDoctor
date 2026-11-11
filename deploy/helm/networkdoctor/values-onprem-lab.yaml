@@ -5,7 +5,8 @@ global:
 
 # Set actual browser-accessible origins before the demo. Do not use .svc URLs.
 grafana:
-  url: ""
+  # Lab Grafana NodePort over Tailscale.
+  url: http://100.122.175.35:32435
 ui:
   url: ""
 slack:
@@ -83,6 +84,10 @@ backend:
     # the scenarios with facts, no change elsewhere). eval/run.py still picks
     # any architecture per run through POST /eval/runs.
     arch: derived
+    # No incident grouping: every alert gets its own investigation and report.
+    # The 2026-10 ablation runs showed grouped alerts merged into one cause too
+    # often (eval/README.md), and Rule 3 / Rule 5 deserve separate conclusions.
+    correlationWindow: "0s"
   # The key Secret (jev-api) is optional: without it derived+jev is skipped.
   jev:
     enabled: true
