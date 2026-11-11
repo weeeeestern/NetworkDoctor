@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 
@@ -96,6 +97,19 @@ func intField(m map[string]any, key string) int {
 	return int(f)
 }
 
+// koreanOutputRules asks for the report text in natural Korean. The prose
+// rules are condensed from NomaDamas/k-skill korean-humanizer (MIT) and the
+// term spellings follow the Kubernetes Korean localization guide; keys, enum
+// values and identifiers stay as they are so parsing and eval keep working.
+const koreanOutputRules = `Write every free-text value in the yaml block (summary, root_cause, observation, reason, hypothesis, recommended_actions, additional_checks) in natural Korean, as an on-call engineer would write it:
+- summary has two one-line fields. summary.symptom: what users saw, with the number and its usual level, e.g. "catshop 응답 지연 1.8s (평소 120ms)". summary.cause: confirmed -> the cause, e.g. "worker1 NIC 혼잡으로 TCP 재전송 급증"; excluded -> why this scenario is not it, plus the likelier cause if seen; inconclusive -> what was missing to decide.
+- Short, direct sentences ending in "~했습니다/~입니다". State what the data shows; do not hedge with "~로 보입니다/~할 수 있습니다" when the numbers are clear.
+- No translation-ese: avoid "~에 대해", "~를 통해", "~에 있어", "~에 의해", "~되어지다", "가지고 있다", "~에서의". Use plain verbs instead of nominalizations.
+- No filler: no "결론적으로/따라서/즉" openers, no "주목할 만합니다", no emoji, no em dash.
+- Terms: 파드, 노드, 서비스, 네임스페이스, 디플로이먼트, 데몬셋, 클러스터, 컨테이너, 레이블. Keep in English: metric names, PromQL, resource and node names, label values, NetworkPolicy, conntrack, CoreDNS, Cilium, Hubble, NIC, TCP, DNS, p99, sRTT.
+- Keep every yaml key and these values in English: rule_id, scenario, investigation_status, confidence, and source.
+`
+
 // BuildAsk renders the investigation request from an incident. No skill name
 // is given: routing is the skills' job (their descriptions start with the
 // rule_id/scenario label values).
@@ -111,10 +125,12 @@ func BuildAskWithFacts(inc *incident.Incident, related []*incident.Incident, win
 	b.WriteString("A NetworkDoctor alert fired. Investigate the root cause with the matching NetworkDoctor skill, ")
 	b.WriteString("Prometheus and read-only Kubernetes tools.\n")
 	b.WriteString("Reply with a short summary, then exactly one fenced ```yaml block that follows the skill's Output Schema ")
-	b.WriteString("(rule_id, scenario, investigation_status, confidence, time_window, affected_resources, root_cause, ")
+	b.WriteString("(rule_id, scenario, investigation_status, confidence, time_window, affected_resources, summary, root_cause, ")
 	b.WriteString("trigger_evidence, supporting_evidence, excluded_alternatives, recommended_actions, additional_checks).\n")
 	b.WriteString("Do not reply with a plan or a status update: keep calling tools until the investigation is finished, ")
 	b.WriteString("and only then send one final reply that ends with the yaml block.\n\n")
+	b.WriteString(koreanOutputRules)
+	b.WriteString("\n")
 
 	fmt.Fprintf(&b, "incident_id: %s\n", inc.IncidentID)
 	fmt.Fprintf(&b, "cluster: %s\n", inc.Cluster)
@@ -217,9 +233,14 @@ func sortedKeys(m map[string]string) []string {
 	return keys
 }
 
+// truncate keeps at most n bytes without splitting a UTF-8 rune (answers
+// are Korean now, three bytes per syllable).
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n] + "..."
 }

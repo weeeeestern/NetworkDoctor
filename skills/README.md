@@ -33,6 +33,11 @@ and were not rewritten. Three changes were made on import (2026-09-30):
    `supporting_evidence`, `excluded_alternatives`, `recommended_actions`,
    `additional_checks`). Scenario-specific fields from the original schema
    move under `scenario_details`.
+4. **Summary and Korean (2026-11-10).** The schema gained `summary`
+   (`symptom`, `cause`): the one-line headline the dashboard, the report and
+   the list show. The backend's investigation request asks for every
+   free-text value in Korean (`koreanOutputRules` in
+   `internal/backend/holmes/client.go`); keys and enum values stay English.
 
 ## Editing
 
