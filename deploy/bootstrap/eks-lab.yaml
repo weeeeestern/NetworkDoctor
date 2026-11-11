@@ -1,0 +1,78 @@
+# EKS lab environment: which child Applications the root app creates.
+# Rendered by deploy/argocd/root-application-eks-lab.yaml. Unlike the on-prem
+# lab, the monitoring stack is also an Argo application here — Terraform
+# (deploy/terraform) stops at the platform layer (VPC/EKS/Cilium/ALB
+# controller/external-dns/Argo CD itself).
+#
+# Adding a chart under deploy/helm/ is not enough to deploy it; it must also
+# be listed here. Argo pulls from GitHub main, so changes must be merged
+# before a sync can see them.
+
+env: eks-lab
+project: default
+
+spec:
+  destination:
+    # In-cluster Argo CD deploys to its own cluster.
+    server: https://kubernetes.default.svc
+
+source:
+  repoURL: https://github.com/weeeeestern/NetworkDoctor.git
+  targetRevision: main
+
+# Empty on purpose: no `automated:` block, so every child Application is
+# manual-sync, same as on-prem. Sync `monitoring` FIRST — it installs the
+# Prometheus Operator CRDs the networkdoctor chart's ServiceMonitor/
+# PrometheusRule/AlertmanagerConfig objects need.
+syncPolicy: {}
+
+applications:
+  # Prometheus Operator + Prometheus + Alertmanager + Grafana from the
+  # upstream Helm repository. The release name MUST stay "monitoring":
+  # the `release: monitoring` selectors and the
+  # monitoring-kube-prometheus-prometheus / monitoring-grafana service names
+  # in deploy/helm/networkdoctor/values-eks-lab.yaml depend on it.
+  # (No local-path-provisioner on EKS; the EBS CSI addon provides gp2.)
+  - name: monitoring
+    namespace: monitoring
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 92.17.1
+    values:
+      prometheus:
+        prometheusSpec:
+          retention: 7d
+          # EBS-backed storage; without it Prometheus data dies with the pod.
+          storageSpec:
+            volumeClaimTemplate:
+              spec:
+                storageClassName: gp2
+                accessModes: [ReadWriteOnce]
+                resources:
+                  requests:
+                    storage: 20Gi
+      grafana:
+        sidecar:
+          dashboards:
+            # searchNamespace already defaults to ALL upstream, so the
+            # NetworkDoctor ConfigMaps in the app namespace are found as-is.
+            # Honor the chart's grafana_folder annotation -> "NetworkDoctor".
+            folderAnnotation: grafana_folder
+            provider:
+              foldersFromFilesStructure: true
+
+  # eBPF agent DaemonSet + backend + Prometheus/Alertmanager wiring
+  - name: networkdoctor
+    namespace: networkdoctor
+    valueFiles:
+      - values-eks-lab.yaml
+
+  # Cat Shop (podinfo) demo workload + fortio load
+  - name: networkdoctor-demo
+    namespace: networkdoctor-demo
+
+  # HolmesGPT RCA agent. Needs Secret holmes-llm (LLM_GATEWAY_KEY) in the
+  # namespace before the first sync; see deploy/helm/holmesgpt/README.md.
+  # EKS-specific values (gateway URL etc.) still to be written — sync last.
+  - name: holmesgpt
+    namespace: holmesgpt

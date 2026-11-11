@@ -15,3 +15,11 @@ internal/bpf/bpf_*.go
 
 # experiment artifacts (local only — cluster-internal data)
 runs/
+
+# Terraform (deploy/terraform)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+*.tfplan
