@@ -45,8 +45,8 @@ groups:
           rule_id: rule-1
           scenario: network-congestion
         annotations:
-          summary: "App p99 latency and TCP retransmits both up on {{ $labels.node }}"
-          description: "{{ $labels.service }} p99 latency {{ $value | humanizeDuration }} (> 500ms) while TCP retransmits on the same node exceed 0.2/s for 3m."
+          summary: "{{ $labels.node }}에서 앱 응답 지연과 TCP 재전송이 함께 증가"
+          description: "{{ $labels.service }} p99 지연 {{ $value | humanizeDuration }} (기준 500ms 초과), 같은 노드의 TCP 재전송이 3분째 0.2/s를 넘음."
 
       # ------------------------------------------------- Rule 1 (cross-node)
       # Rule 1 needs latency and retransmits on the SAME node. That misses
@@ -88,8 +88,8 @@ groups:
           scenario: network-congestion
           variant: cross-node
         annotations:
-          summary: "{{ $labels.target_namespace }}/{{ $labels.service }} slow while {{ $labels.retransmit_node }} retransmits (different nodes)"
-          description: "{{ $labels.service }} p99 latency {{ $value | humanizeDuration }} (> 500ms) on its own nodes, while TCP retransmits exceed 0.2/s on {{ $labels.retransmit_node }}, a different node, for 5m. Lower confidence than Rule 1: the two may be unrelated."
+          summary: "{{ $labels.target_namespace }}/{{ $labels.service }} 응답 지연, 다른 노드 {{ $labels.retransmit_node }}에서 TCP 재전송 증가"
+          description: "{{ $labels.service }} p99 지연 {{ $value | humanizeDuration }} (기준 500ms 초과), 서비스가 없는 노드 {{ $labels.retransmit_node }}의 TCP 재전송이 5분째 0.2/s를 넘음. 두 신호가 무관할 수 있어 Rule 1보다 신뢰도가 낮음."
 
       # ---------------------------------------------------------------- Rule 2
       - alert: NetworkDoctorKernelNetworkBottleneck
@@ -116,8 +116,8 @@ groups:
           rule_id: rule-2
           scenario: kernel-network-bottleneck
         annotations:
-          summary: "Softnet or NIC receive drops on {{ $labels.node }}"
-          description: "softnet drops > 1/s or physical NIC rx drops > 10/s on {{ $labels.node }} for 5m (value {{ $value | printf \"%.2f\" }}/s)."
+          summary: "{{ $labels.node }}에서 softnet 또는 NIC 수신 drop 발생"
+          description: "{{ $labels.node }}에서 softnet drop 1/s 초과 또는 물리 NIC 수신 drop 10/s 초과가 5분째 이어짐 (현재 {{ $value | printf \"%.2f\" }}/s)."
 
       # ---------------------------------------------------------------- Rule 3
       - alert: NetworkDoctorConntrackExhaustion
@@ -142,8 +142,8 @@ groups:
           rule_id: rule-3
           scenario: conntrack-exhaustion
         annotations:
-          summary: "Conntrack table near full or insert failures on {{ $labels.node }}"
-          description: "conntrack entries/limit > 80% or Cilium CT_MAP_INSERTION_FAILED drops on {{ $labels.node }} for 5m (value {{ $value | printf \"%.3f\" }})."
+          summary: "{{ $labels.node }}에서 conntrack 테이블 포화 또는 등록 실패"
+          description: "{{ $labels.node }}에서 conntrack 사용률 80% 초과 또는 Cilium CT_MAP_INSERTION_FAILED drop이 5분째 이어짐 (현재 {{ $value | printf \"%.3f\" }})."
 
       # ---------------------------------------------------------------- Rule 4
       # NXDOMAIN is deliberately excluded: Kubernetes search domains make it
@@ -170,8 +170,8 @@ groups:
           rule_id: rule-4
           scenario: coredns-degradation
         annotations:
-          summary: "CoreDNS slow or returning SERVFAIL"
-          description: "CoreDNS p99 > 250ms or SERVFAIL ratio > 5% for 5m (value {{ $value | printf \"%.3f\" }}). NXDOMAIN is not counted."
+          summary: "CoreDNS 응답 지연 또는 SERVFAIL 증가"
+          description: "CoreDNS p99 250ms 초과 또는 SERVFAIL 비율 5% 초과가 5분째 이어짐 (현재 {{ $value | printf \"%.3f\" }}). NXDOMAIN은 세지 않음."
 
       # ---------------------------------------------------------------- Rule 5
       - alert: NetworkDoctorDNSConntrackCorrelation
@@ -193,8 +193,8 @@ groups:
           rule_id: rule-5
           scenario: dns-conntrack-correlation
         annotations:
-          summary: "Slow DNS together with conntrack pressure on {{ $labels.node }}"
-          description: "Slow DNS responses > 0.1/s and conntrack usage > 50% on the same node for 5m."
+          summary: "{{ $labels.node }}에서 DNS 지연과 conntrack 압박이 함께 발생"
+          description: "같은 노드에서 느린 DNS 응답 0.1/s 초과와 conntrack 사용률 50% 초과가 5분째 이어짐."
 
       # ---------------------------------------------------------------- Rule 6
       # Fires only when exactly one node is unhealthy; a cluster-wide problem
@@ -221,8 +221,8 @@ groups:
           rule_id: rule-6
           scenario: node-localized-failure
         annotations:
-          summary: "TCP connect failures concentrated on {{ $labels.node }}"
-          description: "{{ $value | humanizePercentage }} of TCP connects fail on {{ $labels.node }} while every other node stays below 10%, for 2m."
+          summary: "{{ $labels.node }}에 TCP 연결 실패 집중"
+          description: "{{ $labels.node }}의 TCP 연결 실패율 {{ $value | humanizePercentage }}, 다른 노드는 모두 10% 미만인 상태가 2분째 이어짐."
 
       # ---------------------------------------------------------------- Rule 7
       - alert: NetworkDoctorApplicationInducedBottleneck
@@ -245,8 +245,8 @@ groups:
           rule_id: rule-7
           scenario: application-induced-network-bottleneck
         annotations:
-          summary: "{{ $labels.target_namespace }}/{{ $labels.service }} 5xx while the network is quiet"
-          description: "5xx ratio {{ $value | humanizePercentage }} (> 5%) for 3m with no node above 0.2 TCP retransmits/s."
+          summary: "{{ $labels.target_namespace }}/{{ $labels.service }} 5xx 증가, 네트워크는 평시 수준"
+          description: "5xx 비율 {{ $value | humanizePercentage }} (기준 5% 초과)가 3분째 이어지고, TCP 재전송 0.2/s를 넘는 노드는 없음."
 
       # ---------------------------------------------------------------- Rule 8
       - alert: NetworkDoctorNetworkPolicyDenied
@@ -263,5 +263,5 @@ groups:
           rule_id: rule-8
           scenario: networkpolicy-misconfiguration
         annotations:
-          summary: "Cilium dropping traffic by policy on {{ $labels.node }}"
-          description: "Hubble reports POLICY_DENIED drops on {{ $labels.node }} for 2m ({{ $value | printf \"%.2f\" }}/s)."
+          summary: "{{ $labels.node }}에서 Cilium이 정책으로 트래픽 차단"
+          description: "{{ $labels.node }}에서 Hubble POLICY_DENIED drop이 2분째 이어짐 ({{ $value | printf \"%.2f\" }}/s)."
