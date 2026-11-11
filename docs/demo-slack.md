@@ -1,6 +1,8 @@
 # Slack incident demo
 
-For Korean setup instructions, see [Slack integration guide (한국어)](slack-integration.ko.md).
+For the complete installation, private image, access URL and PDF walkthrough,
+see [Install and access (한국어)](install-and-access.ko.md).
+The [Slack integration guide (한국어)](slack-integration.ko.md) covers app setup and delivery behavior in detail.
 
 This demo uses one Slack parent message per individual incident, even when
 Holmes investigates several incidents as a group. Analysis completion appears
@@ -52,10 +54,12 @@ for `Retry-After` behavior. No Slack event subscription or incoming webhook is n
 
 ## Configure and install this feature build
 
-Build and publish the backend image from `feat/ux` to your demo registry with a
-unique tag, using the existing backend Dockerfile. Override `backend.image.repository`
-and `backend.image.tag` below: the checked-in lab image is an older main build and
-does not include this feature. Pushing this branch does not publish the main image.
+This feature was merged into main in [PR #27](https://github.com/weeeeestern/NetworkDoctor/pull/27).
+Use an image containing that change, or build and publish one from a suitable
+revision with a unique tag using the existing backend Dockerfile. Override
+`backend.image.repository` and `backend.image.tag` below. Check the current lab
+values for its pinned image; an older installed image may still need upgrading.
+Private images also require a pull Secret in the workload namespace.
 
 Create a local `demo-values.yaml` with real addresses and your image tag:
 
@@ -73,7 +77,7 @@ backend:
   replicaCount: 1
   image:
     repository: YOUR_DEMO_BACKEND_IMAGE
-    tag: YOUR_FEAT_UX_TAG
+    tag: YOUR_IMAGE_TAG
   persistence:
     enabled: true
 ```
@@ -87,6 +91,7 @@ actual reachable node IP and port. Port forwarding works for a demo on one PC,
 but a `localhost` link cannot be shared with teammates on other PCs.
 
 ```bash
+# Direct Helm management only; for an Argo CD app, commit its values and manually Sync instead.
 helm lint deploy/helm/networkdoctor \
   -f deploy/helm/networkdoctor/values-onprem-lab.yaml -f demo-values.yaml
 helm upgrade --install networkdoctor deploy/helm/networkdoctor \

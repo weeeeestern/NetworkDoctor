@@ -1,5 +1,7 @@
 # NetworkDoctor Slack 연동 가이드
 
+처음 설치한다면 [Helm 설치부터 접속·Slack·PDF까지](install-and-access.ko.md)를 먼저 읽습니다. Private 이미지 다운로드 권한, Holmes 준비, Helm/Argo CD 구분, UI·Grafana URL 확인과 포트 연결을 포함합니다. 이 문서는 Slack 앱 설정과 알림 동작을 자세히 설명합니다.
+
 ## 설치와 알림 발송은 언제 실행되나요?
 
 **봇 설치와 권한 승인은 처음 연결할 때 한 번 진행합니다.** 설치한 봇의 토큰과 채널 ID를 백엔드에 설정하면, 이후 장애 알림과 분석 완료 댓글은 백엔드가 자동으로 전송합니다. 알림을 보낼 때마다 사람이 승인하는 구조가 아닙니다.
@@ -85,7 +87,7 @@ kubectl -n networkdoctor rollout status deployment/networkdoctor-backend
 
 ## 5. 기능이 포함된 백엔드 이미지 준비
 
-이 기능은 `feat/ux`에 있습니다. 브랜치 푸시만으로 기존 클러스터의 백엔드 이미지가 교체되지는 않습니다. 기능이 포함된 리비전에서 고유한 시연 태그로 이미지를 빌드·업로드한 뒤 Helm에 지정합니다.
+이 기능은 [PR #27](https://github.com/weeeeestern/NetworkDoctor/pull/27)로 main에 병합되었습니다. Git 병합이나 브랜치 푸시만으로 기존 클러스터의 백엔드 이미지가 교체되지는 않습니다. 기능을 포함하는 배포 이미지를 쓰거나, 해당 리비전에서 고유한 태그로 이미지를 빌드·업로드한 뒤 Helm에 지정합니다.
 
 아래 `YOUR_REGISTRY`를 자신이 푸시할 수 있는 저장소로 바꿉니다. Docker와 해당 저장소 로그인이 준비되어 있어야 합니다. 현재 백엔드 배포 이미지의 대상 아키텍처는 `linux/amd64`입니다.
 
@@ -97,7 +99,7 @@ docker buildx build --platform linux/amd64 \
   -t "$ND_SLACK_DEMO_REPO:$ND_SLACK_DEMO_TAG" --push .
 ```
 
-기존 랩 values에 고정된 이전 main 이미지는 이 기능을 포함하지 않습니다. 시연 이미지는 별도 태그를 사용하고, 이 절차에서 main 브랜치를 병합하거나 푸시할 필요는 없습니다.
+현재 랩의 고정 이미지 태그는 `deploy/helm/networkdoctor/values-onprem-lab.yaml`에서 확인합니다. 이전 설치가 오래된 이미지를 사용한다면 업그레이드가 필요합니다. Private 저장소를 쓰면 PC 로그인과 별도로 Kubernetes의 `imagePullSecrets`도 설정합니다. [이미지·다운로드 권한 준비](install-and-access.ko.md#3-이미지-준비와-private-저장소-권한)
 
 ## 6. Helm 설정과 배포
 
@@ -144,7 +146,9 @@ helm upgrade --install networkdoctor deploy/helm/networkdoctor \
 kubectl -n networkdoctor rollout status deployment/networkdoctor-backend
 ```
 
-Argo CD로 관리하는 환경에서는 기존 Application의 소스 리비전과 values에 이 기능 및 설정을 반영하고 해당 배포 절차로 동기화합니다. 배포 방식은 [기존 랩 설치 문서](deploy-onprem.md)를 참고합니다.
+Argo CD로 관리하는 환경에서는 위 Helm 명령을 겹쳐 실행하지 않습니다. 기존 Application의 소스 리비전과 Git의 values에 기능 및 설정을 반영하고 수동 Sync합니다. 로컬 `slack-demo-values.yaml`은 Argo CD가 자동으로 읽지 않습니다. 배포 방식은 [기존 랩 설치 문서](deploy-onprem.md)를 참고합니다.
+
+접속을 여는 명령과 설치 후 URL 확인 방법은 [UI·Grafana 접속 안내](install-and-access.ko.md#6-uigrafana-접속을-열고-url-확인하기)를 따릅니다. 현재 Helm NOTES는 UI·Grafana URL을 출력하지 않습니다. 설치 담당자가 실제 접속 경로를 마련한 뒤 팀에 주소를 전달합니다.
 
 Slack의 기본값은 비활성화입니다. 활성화 시 차트는 백엔드가 1개이고 영속 볼륨을 사용하도록 검사합니다. 배포 전략은 기존 `Recreate`를 유지합니다. 인시던트 이력·분석 결과·Slack 발송 상태가 볼륨에 저장되며, PDF는 요청 시 브라우저에서 생성해 사용자 PC로 다운로드합니다.
 
@@ -196,6 +200,7 @@ Prometheus 장애 감지 → Alertmanager → NetworkDoctor 인시던트 생성
 
 ## 참고
 
+- [설치·접속 통합 가이드](install-and-access.ko.md)
 - [영문 시연 가이드](demo-slack.md)
 - [Slack 앱 생성 공식 안내](https://docs.slack.dev/tools/bolt-js/creating-an-app/): 앱·권한·토큰 설정 부분 참고
 - [Slack 메시지 발송 API](https://docs.slack.dev/reference/methods/chat.postMessage/)

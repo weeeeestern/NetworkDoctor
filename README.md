@@ -107,7 +107,7 @@ backend 바이너리에 `go:embed`로 내장된 웹 대시보드입니다(별도
 
 ## 배포
 
-설치·검증·롤백 절차는 [docs/deploy-onprem.md](./docs/deploy-onprem.md)에 있습니다. 요약하면 다음과 같습니다.
+처음 설치한다면 **[설치부터 Slack·Grafana·UI·PDF 확인까지](./docs/install-and-access.ko.md)**를 따라갑니다. 이미지 빌드·Private 다운로드 권한, Helm/Argo CD, 봇 토큰 Secret, 실제 접속 URL과 포트 연결, 장애 재현·종료 순서를 포함합니다. [Slack 연동 상세](./docs/slack-integration.ko.md)와 [온프레미스 점검·롤백](./docs/deploy-onprem.md)도 참고합니다. 요약하면 다음과 같습니다.
 
 1. **전제:** Linux 커널 5.8+ 와 BTF, privileged·hostNetwork 허용, kube-prometheus-stack(Operator CRD 포함), OpenAI 호환 LLM 엔드포인트. CNI가 Cilium이면 차트가 Cilium 지표를 자동으로 수집합니다. Cilium 쪽에서 지표(`prometheus.enabled`, Hubble `drop`)가 켜져 있어야 합니다(Rule 8에 필요).
 2. **차트:** `deploy/helm/networkdoctor`(에이전트·룰·backend), `deploy/helm/holmesgpt`(Holmes + 스킬), `deploy/helm/networkdoctor-demo`(Cat Shop, 랩 전용).
