@@ -228,7 +228,7 @@ func TestReadEndpoints(t *testing.T) {
 	resp, _ = http.Get(srv.URL + "/incidents/" + id + "/report.md")
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "# NetworkDoctorTCPRetransmitBurstHigh") {
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "# smoke-tcp-retransmit-burst") {
 		t.Errorf("GET report.md = %d %q", resp.StatusCode, string(body)[:min(80, len(body))])
 	}
 
@@ -286,30 +286,6 @@ func TestWebhookEnqueuesOnlyNewFiringIncidents(t *testing.T) {
 	}
 }
 
-func TestListCause(t *testing.T) {
-	cases := []struct {
-		name string
-		r    map[string]any
-		want string
-	}{
-		{"nil result", nil, ""},
-		{"root_cause only", map[string]any{"root_cause": "worker1 link congestion"}, "worker1 link congestion"},
-		{"summary wins", map[string]any{
-			"root_cause": "long paragraph",
-			"summary":    map[string]any{"cause": "worker1 NIC 혼잡"},
-		}, "worker1 NIC 혼잡"},
-		{"empty summary falls back", map[string]any{
-			"root_cause": "long paragraph",
-			"summary":    map[string]any{"cause": ""},
-		}, "long paragraph"},
-	}
-	for _, c := range cases {
-		if got := listCause(c.r); got != c.want {
-			t.Errorf("%s: listCause = %q, want %q", c.name, got, c.want)
-		}
-	}
-}
-
 // Group members retain their alert identity while reading the primary's analysis.
 func TestDetailAndReportUseGroupAnalysis(t *testing.T) {
 	srv, store := newTestServer(t)
@@ -350,12 +326,12 @@ func TestDetailAndReportUseGroupAnalysis(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	for _, want := range []string{"inc-222222222222", "resolved", "Member DNS symptom", "member-node", "Shared link saturated", "inc-111111111111", "excluded", "primary-model", "431", "primary observation"} {
+	for _, want := range []string{"inc-222222222222", "복구됨", "Member DNS symptom", "member-node", "Shared link saturated", "inc-111111111111", "이 시나리오 아님", "primary-model", "431", "primary observation"} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("group report missing %q: %s", want, body)
 		}
 	}
-	if strings.Contains(string(body), "**confirmed**") {
+	if strings.Contains(string(body), "**추정 원인**") {
 		t.Error("completed excluded result must not become confirmed")
 	}
 	// A member that receives its own manual investigation no longer borrows the primary.
@@ -374,7 +350,7 @@ func TestDetailAndReportUseGroupAnalysis(t *testing.T) {
 	}
 	body, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if !strings.Contains(string(body), "Previous analysis") || !strings.Contains(string(body), "Earlier member finding") || strings.Contains(string(body), "Shared link saturated") {
+	if !strings.Contains(string(body), "이전 분석") || !strings.Contains(string(body), "Earlier member finding") || strings.Contains(string(body), "Shared link saturated") {
 		t.Fatalf("failed retry must retain clearly labelled own previous analysis: %s", body)
 	}
 }

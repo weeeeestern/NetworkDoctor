@@ -292,23 +292,38 @@ var slackEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 func escape(text string) string { return slackEscaper.Replace(text) }
 
 func (w *Worker) parentText(i *incident.Incident) string {
-	text := fmt.Sprintf("*Incident detected*\nSymptom: %s\nNodes: %s\nStarted: %s", escape(i.SymptomSummary), escape(strings.Join(i.AffectedNodes, ", ")), i.StartsAt.UTC().Format(time.RFC3339))
+	text := fmt.Sprintf("*장애 감지 · %s*\n증상: %s\n노드: %s\n발생: %s", escape(i.ScenarioName()), escape(i.SymptomSummary), escape(strings.Join(i.AffectedNodes, ", ")), i.StartsAt.UTC().Format(time.RFC3339))
 	if url := w.o.Links.For(i).Grafana; url != "" {
-		text += "\n<" + escape(url) + "|Open Grafana>"
+		text += "\n<" + escape(url) + "|Grafana에서 보기>"
 	}
 	return text
 }
 
 func (w *Worker) replyText(i *incident.Incident, view incident.ResultView) string {
-	value := func(key string) string { v, _ := view.Result[key].(string); return escape(v) }
-	text := "*Analysis ready*"
+	h := i.HeadlineFor(view.Result)
+	conf, _ := view.Result["confidence"].(string)
+	text := "*원인 분석 완료*"
 	if view.Shared {
-		text += "\nRelated group analysis (individual validation not guaranteed)"
-		text += "\nRepresentative incident: " + escape(view.SourceIncidentID)
+		text += "\n함께 묶인 알림의 분석 결과입니다 (이 알림을 따로 검증하지는 않음)"
+		text += "\n대표 인시던트: " + escape(view.SourceIncidentID)
 	}
-	text += "\nCause: " + value("root_cause") + "\nInvestigation status: " + value("investigation_status") + "\nConfidence: " + value("confidence") + "\nIncident recovery: " + escape(i.RecoveryStatus)
+	text += "\n" + escape(h.CauseLabel) + ": " + escape(h.Cause)
+	if c := incident.ConfidenceName(conf); c != "" {
+		text += "\n신뢰도: " + c
+	}
+	recovery := map[string]string{incident.RecoveryOpen: "진행 중", incident.RecoveryResolved: "복구됨"}[i.RecoveryStatus]
+	text += "\n상태: " + escape(firstNonEmpty(recovery, i.RecoveryStatus))
 	if url := w.o.Links.For(i).Incident; url != "" {
-		text += "\n<" + escape(url) + "|View latest report>"
+		text += "\n<" + escape(url) + "|레포트 보기>"
 	}
 	return text
+}
+
+func firstNonEmpty(v ...string) string {
+	for _, s := range v {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
 }

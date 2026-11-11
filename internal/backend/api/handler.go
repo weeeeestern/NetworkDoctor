@@ -266,6 +266,7 @@ type IncidentSummary struct {
 	Severity       string     `json:"severity"`
 	RuleID         string     `json:"rule_id"`
 	Scenario       string     `json:"scenario"`
+	ScenarioName   string     `json:"scenario_name"`
 	SymptomSummary string     `json:"symptom_summary"`
 	StartsAt       time.Time  `json:"starts_at"`
 	EndsAt         *time.Time `json:"ends_at"`
@@ -275,23 +276,11 @@ type IncidentSummary struct {
 	HolmesTokens   int        `json:"holmes_total_tokens,omitempty"`
 	HolmesCostUSD  float64    `json:"holmes_cost_usd,omitempty"`
 	CorrelationID  string     `json:"correlation_id,omitempty"`
-	// Cause, Confidence and InvestigationStatus come from the Holmes result
-	// so the list can show "symptom -> likely cause" without a detail fetch.
-	Cause               string `json:"cause,omitempty"`
-	Confidence          string `json:"confidence,omitempty"`
-	InvestigationStatus string `json:"investigation_status,omitempty"`
-}
-
-// listCause is the one-line cause for the list: the skill's summary.cause
-// when present, otherwise the root_cause sentence(s).
-func listCause(r map[string]any) string {
-	if s, ok := r["summary"].(map[string]any); ok {
-		if c, ok := s["cause"].(string); ok && c != "" {
-			return c
-		}
-	}
-	c, _ := r["root_cause"].(string)
-	return c
+	// Headline and Confidence come from the Holmes result so the list shows
+	// "symptom -> likely cause" without a detail fetch.
+	Headline       incident.Headline `json:"headline"`
+	Confidence     string            `json:"confidence,omitempty"`
+	ConfidenceName string            `json:"confidence_name,omitempty"`
 }
 
 func (h *handler) listIncidents(w http.ResponseWriter, r *http.Request) {
@@ -307,9 +296,7 @@ func (h *handler) listIncidents(w http.ResponseWriter, r *http.Request) {
 		if statusFilter != "" && inc.AlertStatus != statusFilter {
 			continue
 		}
-		res := inc.HolmesResult
-		conf, _ := res["confidence"].(string)
-		st, _ := res["investigation_status"].(string)
+		conf, _ := inc.HolmesResult["confidence"].(string)
 		out = append(out, IncidentSummary{
 			IncidentID:     inc.IncidentID,
 			AlertStatus:    inc.AlertStatus,
@@ -317,6 +304,7 @@ func (h *handler) listIncidents(w http.ResponseWriter, r *http.Request) {
 			Severity:       inc.Severity,
 			RuleID:         inc.RuleID,
 			Scenario:       inc.Scenario,
+			ScenarioName:   inc.ScenarioName(),
 			SymptomSummary: inc.SymptomSummary,
 			StartsAt:       inc.StartsAt,
 			EndsAt:         inc.EndsAt,
@@ -327,9 +315,9 @@ func (h *handler) listIncidents(w http.ResponseWriter, r *http.Request) {
 			HolmesCostUSD:  inc.HolmesCostUSD,
 			CorrelationID:  inc.CorrelationID,
 
-			Cause:               listCause(res),
-			Confidence:          conf,
-			InvestigationStatus: st,
+			Headline:       inc.Headline(),
+			Confidence:     conf,
+			ConfidenceName: incident.ConfidenceName(conf),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"incidents": out, "count": len(out)})
@@ -350,11 +338,16 @@ func (h *handler) getIncident(w http.ResponseWriter, r *http.Request) {
 	// with the same public incident fields and the selected diagnosis.
 	public := *inc
 	public.SlackNotification = nil
+	view := incident.ResolveResult(inc, h.store.Get)
+	conf, _ := view.Result["confidence"].(string)
 	writeJSON(w, http.StatusOK, struct {
 		*incident.Incident
-		Analysis incident.ResultView `json:"analysis"`
-		Links    links.Links         `json:"links"`
-	}{&public, incident.ResolveResult(inc, h.store.Get), h.links.For(inc)})
+		Analysis       incident.ResultView `json:"analysis"`
+		Links          links.Links         `json:"links"`
+		Headline       incident.Headline   `json:"headline"`
+		ScenarioName   string              `json:"scenario_name"`
+		ConfidenceName string              `json:"confidence_name,omitempty"`
+	}{&public, view, h.links.For(inc), inc.HeadlineFor(view.Result), inc.ScenarioName(), incident.ConfidenceName(conf)})
 }
 
 func (h *handler) holmesRetry(w http.ResponseWriter, r *http.Request) {

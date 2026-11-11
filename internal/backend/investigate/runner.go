@@ -48,7 +48,7 @@ func MarkInterrupted(store interface {
 				return incident.ErrNoChange
 			}
 			i.HolmesStatus = "failed"
-			i.HolmesError = "Analysis interrupted by backend restart; reanalyze manually."
+			i.HolmesError = "백엔드가 재시작되어 분석이 중단됐습니다. 재분석을 눌러 주세요."
 			i.UpdatedAt = time.Now().UTC()
 			changed = true
 			return nil

@@ -40,18 +40,6 @@
   const badge = (text, cls) =>
     text ? `<span class="badge ${cls}">${esc(text)}</span>` : '';
 
-  const severityBadge = (sev) =>
-    badge(sev || 'none', ['critical', 'warning', 'info'].includes(sev) ? sev : 'neutral');
-
-  const statusBadge = (st) =>
-    badge(st, st === 'firing' ? 'firing' : st === 'resolved' ? 'resolved' : 'neutral');
-
-  const holmesBadge = (st) => {
-    if (!st) return '<span class="badge neutral">not run</span>';
-    const cls = ['done', 'running', 'queued', 'failed'].includes(st) ? st : 'neutral';
-    return badge(st, cls);
-  };
-
   const fmtTok = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
   const fmtCost = (v) => `$${v >= 0.1 ? v.toFixed(2) : v.toFixed(3)}`;
 
@@ -107,34 +95,26 @@
 
   // ---------- list view ----------
 
-  // Korean display names of the scenario skills (rule_id order).
-  const SCENARIO_KO = {
-    'network-congestion': '네트워크 혼잡',
-    'kernel-network-bottleneck': '커널 네트워크 병목',
-    'conntrack-exhaustion': 'conntrack 고갈',
-    'coredns-degradation': 'CoreDNS 성능 저하',
-    'dns-conntrack-correlation': 'DNS·conntrack 연쇄 장애',
-    'node-localized-failure': '특정 노드 장애',
-    'application-induced-network-bottleneck': '애플리케이션발 네트워크 병목',
-    'networkpolicy-misconfiguration': 'NetworkPolicy 설정 오류',
-  };
-  const scenarioKo = (i) => SCENARIO_KO[i.scenario] || i.scenario || i.rule_id || i.incident_id;
+  const scenarioName = (i) => i.scenario_name || i.scenario || i.rule_id || i.incident_id;
 
-  const CONFIDENCE_KO = { high: ['높음', 'done'], medium: ['보통', 'warning'], low: ['낮음', 'failed'] };
-  const confidenceBadge = (c) => (CONFIDENCE_KO[c] ? badge(`신뢰도 ${CONFIDENCE_KO[c][0]}`, CONFIDENCE_KO[c][1]) : '');
+  // Chip colour per confidence; the Korean label comes from the API.
+  const CONFIDENCE_CLS = { high: 'done', medium: 'warning', low: 'failed' };
+  const confidenceBadge = (i) => (i.confidence_name ? badge(`신뢰도 ${i.confidence_name}`, CONFIDENCE_CLS[i.confidence] || 'neutral') : '');
 
   const STATUS_KO = { firing: '진행 중', resolved: '복구됨' };
-  const statusBadgeKo = (st) => badge(STATUS_KO[st] || st, st === 'firing' ? 'firing' : st === 'resolved' ? 'resolved' : 'neutral');
+  const statusBadge = (st) => badge(STATUS_KO[st] || st, st === 'firing' ? 'firing' : st === 'resolved' ? 'resolved' : 'neutral');
 
-  // The cause line under the symptom, by investigation state.
+  // The cause line under the symptom, by investigation state. The label is
+  // only spelled out when the conclusion is not a plain likely cause.
   function causeCell(i) {
-    if (i.holmes_status === 'done' && i.cause) {
-      const prefix = i.investigation_status === 'excluded' ? '이 시나리오 아님: '
-        : i.investigation_status === 'inconclusive' ? '원인 불확실: ' : '';
-      return `<div class="cause-line">→ ${esc(prefix)}${esc(i.cause)}</div>`;
+    const pending = { queued: '원인 분석 중…', running: '원인 분석 중…' }[i.holmes_status];
+    if (pending) return `<div class="cause-line pending">${pending}</div>`;
+    const h = i.headline || {};
+    if (h.cause) {
+      const prefix = h.cause_label && h.cause_label !== '추정 원인' ? `${h.cause_label}: ` : '';
+      return `<div class="cause-line">→ ${esc(prefix)}${esc(h.cause)}</div>`;
     }
-    const msg = { queued: '원인 분석 중…', running: '원인 분석 중…', failed: '원인 분석 실패' }[i.holmes_status];
-    return msg ? `<div class="cause-line pending">${msg}</div>` : '';
+    return i.holmes_status === 'failed' ? '<div class="cause-line pending">원인 분석 실패</div>' : '';
   }
 
   async function renderList() {
@@ -177,12 +157,12 @@
       const group = members[i.incident_id] || [];
       return `
       <tr data-id="${esc(i.incident_id)}">
-        <td>${statusBadgeKo(i.alert_status)}</td>
+        <td>${statusBadge(i.alert_status)}</td>
         <td>
-          <div class="cell-main">${esc(i.symptom_summary || scenarioKo(i))}</div>
+          <div class="cell-main">${esc((i.headline && i.headline.symptom) || scenarioName(i))}</div>
           ${causeCell(i)}
-          <div class="cell-sub">${esc(scenarioKo(i))} ${i.holmes_status === 'done' ? confidenceBadge(i.confidence) : ''}</div>
-          ${group.length ? `<div class="group-line">└ 함께 묶인 알림 ${group.length}건: ${esc(group.map((g) => g.symptom_summary || scenarioKo(g)).join(', '))}</div>` : ''}
+          <div class="cell-sub">${esc(scenarioName(i))} ${i.holmes_status === 'done' ? confidenceBadge(i) : ''}</div>
+          ${group.length ? `<div class="group-line">└ 함께 묶인 알림 ${group.length}건: ${esc(group.map((g) => (g.headline && g.headline.symptom) || scenarioName(g)).join(', '))}</div>` : ''}
         </td>
         <td>${esc((i.affected_nodes || []).join(', ') || '-')}</td>
         <td>
@@ -277,6 +257,15 @@
   let detailID = null;
   let requestedAnalysis = null;
 
+  const HOLMES_KO = {
+    done: '분석 완료', running: '분석 중', queued: '분석 대기', failed: '분석 실패',
+    skipped: '분석 생략', grouped: '그룹으로 분석', unavailable: '그룹 분석 없음',
+  };
+  const holmesName = (st) => HOLMES_KO[st] || '분석 안 함';
+  const holmesBadge = (st) => badge(holmesName(st), ['done', 'running', 'queued', 'failed'].includes(st) ? st : 'neutral');
+
+  // The diagnosis shown for this incident: its own, or its group's shared
+  // one (the server resolves it; older servers only send holmes_result).
   const analysisFor = (inc) => inc.analysis || {
     source_incident_id: inc.incident_id,
     source_holmes_status: inc.holmes_status,
@@ -294,94 +283,154 @@
 
   const incidentLink = (id) => `<a href="#/incident/${esc(encodeURIComponent(id))}" class="mono">${esc(id)}</a>`;
 
-  function analysisCaption(analysis) {
-    return analysis.shared
-      ? `<p class="page-sub">Related group analysis · source ${incidentLink(analysis.source_incident_id)}</p>`
-      : '';
-  }
-
-  function diagnosisSummary(inc, analysis) {
-    const r = analysis.result;
-    const cause = r && ((r.summary && r.summary.cause) || r.root_cause);
-    const state = analysis.source_holmes_status || 'not run';
-    const conclusion = r && r.investigation_status;
-    const label = conclusion === 'excluded' ? 'Scenario excluded'
-      : conclusion === 'inconclusive' ? 'Cause inconclusive'
-      : conclusion === 'confirmed' ? 'Cause confirmed' : 'Analysis result';
-    const pending = analysis.unavailable ? 'Related group analysis unavailable.'
-      : ({queued: 'Analysis queued.', running: 'Analysis in progress.', failed: 'Analysis failed.', skipped: 'Analysis not run.'}[state] || 'No analysis result yet.');
-    return `<div class="card">
-      <div class="card-head"><h2 class="card-title">Symptom → cause</h2></div>
-      <div class="card-body">
-        <div class="section-sub">Symptom</div><div class="rc-text">${esc(inc.symptom_summary || inc.scenario || '-')}</div>
-        <div class="rc-stats">
-          ${rcStat('Occurred', fmtTime(inc.starts_at))}
-          ${rcStat('Analysis', state)}
-          ${r && r.confidence ? rcStat('Confidence', r.confidence, confidenceCls(r.confidence)) : ''}
-        </div>
-        ${analysisCaption(analysis)}
-        ${cause ? `<div class="section-sub">${analysis.previous ? 'Previous analysis · ' : ''}${esc(label)}</div><div class="rc-text">${esc(cause)}</div>` : `<p class="page-sub">${esc(pending)}</p>`}
-        ${analysis.previous ? `<p class="page-sub">Current analysis is ${esc(state)}. The earlier finding is shown until a new result is available.</p>` : ''}
-      </div></div>`;
-  }
-
-  const holmesList = (title, items) => {
-    if (!Array.isArray(items) || items.length === 0) return '';
-    const lis = items.map((it) => {
-      if (typeof it === 'string') return `<li>${esc(it)}</li>`;
-      if (it && typeof it === 'object') {
-        const head = it.source || it.hypothesis || it.metric_or_tool || '';
-        const body = it.observation || it.reason || '';
-        return `<li>${head ? `<b>${esc(head)}</b>: ` : ''}${esc(body || JSON.stringify(it))}</li>`;
-      }
-      return `<li>${esc(String(it))}</li>`;
-    }).join('');
-    return `<div class="section-sub">${esc(title)}</div><ul class="plain">${lis}</ul>`;
-  };
-
-  // One labelled stat chip of the investigation summary row.
-  const rcStat = (label, value, cls = '', sub = '') => `
-    <div class="rc-stat">
-      <div class="k">${esc(label)}</div>
-      <div class="v ${cls}">${esc(value)}${sub ? ` <span class="sub">${esc(sub)}</span>` : ''}</div>
-    </div>`;
-
-  const confidenceCls = (c) =>
-    c === 'high' ? 'good' : c === 'medium' ? 'warn' : c === 'low' ? 'bad' : '';
-
-  function rootCauseCard(inc, analysis) {
-    const r = analysis.result;
-    if (!r) {
-      const msg = analysis.unavailable
-        ? '<p class="page-sub">Related group analysis unavailable.</p>'
-        : !analysis.shared && inc.holmes_error
-        ? `<div class="notice err">Investigation failed: ${esc(inc.holmes_error)}</div>`
-        : `<p class="page-sub">No investigation result yet (status: ${esc(analysis.source_holmes_status || 'not run')}).</p>`;
-      return `<div class="card"><div class="card-head"><h2 class="card-title">Root cause</h2></div>
-        <div class="card-body">${msg}</div></div>`;
+  // One evidence / exclusion / action entry of the Holmes result, which the
+  // schema allows as either a string or a {source|hypothesis, observation|reason} map.
+  const itemParts = (it) => {
+    if (it && typeof it === 'object') {
+      return {
+        head: it.hypothesis || it.source || it.metric_or_tool || '',
+        body: it.observation || it.reason || JSON.stringify(it),
+      };
     }
-    const st = r.investigation_status;
+    return { head: '', body: String(it ?? '') };
+  };
+  const hasItems = (v) => Array.isArray(v) && v.length > 0;
+
+  const evidenceList = (items, cls) => items.map((it) => {
+    const { head, body } = itemParts(it);
+    return `<div class="ev-item ${cls}">${esc(body)}${head ? `<div class="ev-src mono">${esc(head)}</div>` : ''}</div>`;
+  }).join('');
+
+  function summaryCard(inc, analysis, grafanaURL) {
+    const h = inc.headline || {};
+    const r = analysis.result;
+    const state = analysis.source_holmes_status;
+    const waiting = { queued: '원인 분석 대기 중…', running: '원인 분석 중…' }[state];
+    let causeBlock;
+    if (h.cause) {
+      causeBlock = `<div class="sum-k">${analysis.previous ? '이전 분석 · ' : ''}${esc(h.cause_label)}</div><div class="sum-v cause">${esc(h.cause)}</div>`;
+    } else {
+      const msg = analysis.unavailable ? '함께 묶인 대표 인시던트의 분석을 찾을 수 없습니다'
+        : waiting || (state === 'failed' ? '원인 분석에 실패했습니다' : '아직 분석하지 않았습니다');
+      causeBlock = `<div class="sum-k">추정 원인</div><div class="sum-v pending">${esc(msg)}</div>`;
+    }
     return `
-      <div class="card">
-        <div class="card-head"><h2 class="card-title">${analysis.previous ? 'Previous analysis' : 'Analysis details'}</h2></div>
-        <div class="card-body">
-          <div class="rc-stats">
-            ${st ? rcStat('status', st, st === 'confirmed' ? 'good' : st === 'excluded' ? 'warn' : '') : ''}
-            ${r.confidence ? rcStat('confidence', r.confidence, confidenceCls(r.confidence)) : ''}
+      <div class="card summary-card">
+        <div class="sum-k">증상</div>
+        <div class="sum-v">${esc(h.symptom || inc.symptom_summary || inc.scenario_name)}</div>
+        ${causeBlock}
+        ${analysis.previous && waiting ? `<p class="page-sub">새 분석이 끝날 때까지 이전 결과를 보여줍니다 (${esc(holmesName(state))}).</p>` : ''}
+        ${analysis.shared ? `<p class="page-sub">함께 묶인 ${incidentLink(analysis.source_incident_id)} 인시던트의 분석 결과입니다.</p>` : ''}
+        <div class="sum-foot">
+          <div class="badge-row">
+            ${r ? confidenceBadge({ confidence: r.confidence, confidence_name: inc.confidence_name }) : ''}
+            ${badge(`${fmtTime(inc.starts_at)} 발생`, 'neutral')}
           </div>
-          <div class="rc-text">${esc(String(r.root_cause || '').trim())}</div>
-          ${holmesList('Trigger evidence', r.trigger_evidence)}
-          ${holmesList('Supporting evidence', r.supporting_evidence)}
-          ${holmesList('Excluded alternatives', r.excluded_alternatives)}
-          ${holmesList('Recommended actions', r.recommended_actions)}
-          ${holmesList('Additional checks', r.additional_checks)}
+          ${grafanaURL ? `<a class="grafana-link" href="${esc(grafanaURL)}" target="_blank" rel="noopener noreferrer">Grafana에서 자세히 보기 →</a>` : ''}
         </div>
       </div>`;
   }
 
+  function analysisCards(inc, analysis) {
+    const r = analysis.result;
+    if (!r) {
+      return !analysis.shared && inc.holmes_error
+        ? `<div class="notice err">원인 분석 실패: ${esc(inc.holmes_error)}</div>`
+        : '';
+    }
+    const card = (title, body) => `
+      <div class="card">
+        <div class="card-head"><h2 class="card-title">${title}</h2></div>
+        <div class="card-body">${body}</div>
+      </div>`;
+    const out = [];
+    // Without summary.cause the headline already is root_cause.
+    const rc = String(r.root_cause || '').trim();
+    if (rc && rc !== (inc.headline || {}).cause) out.push(card('① 원인 분석', `<p class="rc-text">${esc(rc)}</p>`));
+    if (hasItems(r.trigger_evidence) || hasItems(r.supporting_evidence)) {
+      out.push(card('② 근거', `
+        ${hasItems(r.trigger_evidence) ? `<div class="section-sub">알림을 일으킨 신호</div>${evidenceList(r.trigger_evidence, 'trigger')}` : ''}
+        ${hasItems(r.supporting_evidence) ? `<div class="section-sub">함께 움직인 신호</div>${evidenceList(r.supporting_evidence, 'support')}` : ''}`));
+    }
+    if (hasItems(r.excluded_alternatives)) {
+      out.push(card('③ 배제한 원인', r.excluded_alternatives.map((it) => {
+        const { head, body } = itemParts(it);
+        return `<div class="exc-row">${head ? `<s class="exc-name">${esc(head)}</s>` : ''}<span>${esc(body)}</span></div>`;
+      }).join('')));
+    }
+    if (hasItems(r.recommended_actions) || hasItems(r.additional_checks)) {
+      const li = (items) => items.map((it) => `<li>${esc(itemParts(it).body)}</li>`).join('');
+      out.push(card('④ 권장 조치', `
+        ${hasItems(r.recommended_actions) ? `<ol class="actions">${li(r.recommended_actions)}</ol>` : ''}
+        ${hasItems(r.additional_checks) ? `<div class="section-sub">추가로 확인하면 좋은 것</div><ul class="plain">${li(r.additional_checks)}</ul>` : ''}`));
+    }
+    return out.join('');
+  }
+
+  // One labelled stat chip of the investigation cost row.
+  const rcStat = (label, value, sub = '') => `
+    <div class="rc-stat">
+      <div class="k">${esc(label)}</div>
+      <div class="v">${esc(value)}${sub ? ` <span class="sub">${esc(sub)}</span>` : ''}</div>
+    </div>`;
+
+  function detailsFold(inc, open) {
+    const labels = Object.entries(inc.alert_labels || {}).sort(([a], [b]) => a.localeCompare(b));
+    const evidences = inc.evidence_metrics || [];
+    const sourceURL = safeHTTPURL(inc.generator_url);
+    const correlation = inc.correlation_id && inc.correlation_id !== inc.incident_id
+      ? `${incidentLink(inc.correlation_id)}에 묶임`
+      : (inc.correlated_incidents || []).length
+        ? `대표 인시던트 · ${inc.correlated_incidents.map(incidentLink).join(', ')}`
+        : '';
+    const meta = [
+      ['룰 / 시나리오', `${esc(inc.rule_id || '-')} / ${esc(inc.scenario || '-')}`],
+      ['클러스터', esc(inc.cluster || '-')],
+      ['발생', fmtTime(inc.starts_at)],
+      ['복구', inc.ends_at ? fmtTime(inc.ends_at) : '-'],
+      ['노드', esc((inc.affected_nodes || []).join(', ') || '-')],
+      ['서비스', esc((inc.affected_services || []).join(', ') || '-')],
+      ['알림 요약', esc(inc.symptom_summary || '-')],
+      ['알림 수신', `${esc(inc.delivery_count ?? '-')}회`],
+      ['이 인시던트의 분석', esc(holmesName(inc.holmes_status))],
+    ];
+    if (correlation) meta.push(['상관 그룹', correlation]);
+    const cost = [
+      inc.holmes_model ? rcStat('모델', inc.holmes_model) : '',
+      inc.holmes_tool_calls ? rcStat('도구 호출', `${inc.holmes_tool_calls}회`) : '',
+      inc.holmes_total_tokens ? rcStat('토큰', fmtTok(inc.holmes_total_tokens), `입력 ${fmtTok(inc.holmes_prompt_tokens || 0)} · 출력 ${fmtTok(inc.holmes_completion_tokens || 0)}`) : '',
+      inc.holmes_cost_usd ? rcStat('비용', fmtCost(inc.holmes_cost_usd)) : '',
+    ].join('');
+    return `
+      <details class="card fold"${open ? ' open' : ''}>
+        <summary>상세 정보</summary>
+        <div class="card-body">
+          <div class="meta-grid">
+            ${meta.map(([k, v]) => `<div class="meta-item"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('')}
+          </div>
+          ${cost ? `<div class="section-sub">분석 비용</div><div class="rc-stats">${cost}</div>` : ''}
+          ${inc.holmes_error ? `<p class="notice err">${esc(inc.holmes_error)}</p>` : ''}
+          ${evidences.length ? `<div class="section-sub">NetworkDoctor 수집 지표</div>
+            ${evidences.map((e) => `
+              <div class="evidence-item">
+                <b>${esc(e.metric)}</b>: ${esc(e.observation)}
+                <code class="evidence-q">${esc(e.query)}</code>
+              </div>`).join('')}` : ''}
+          ${labels.length ? `<div class="section-sub">알림 레이블</div>
+            <table class="kv-table"><tbody>
+              ${labels.map(([k, v]) => `<tr><td class="mono">${esc(k)}</td><td class="mono">${esc(v)}</td></tr>`).join('')}
+            </tbody></table>` : ''}
+          <div class="section-sub fold-links">
+            <a href="/incidents/${esc(encodeURIComponent(inc.incident_id))}/report.md" target="_blank" rel="noopener noreferrer">Markdown 레포트 열기</a>
+            ${sourceURL ? `<a href="${esc(sourceURL)}" target="_blank" rel="noopener noreferrer">원본 쿼리 보기</a>` : ''}
+          </div>
+        </div>
+      </details>`;
+  }
+
   async function renderDetail(id, polling = false) {
     clearTimeout(detailPollTimer);
-    if (!polling) view.innerHTML = '<div class="loading">Loading incident…</div>';
+    if (!polling) view.innerHTML = '<div class="loading">인시던트를 불러오는 중…</div>';
     let inc;
     try {
       inc = await getJSON(`/incidents/${encodeURIComponent(id)}`);
@@ -389,13 +438,13 @@
       if (detailID !== id) return;
       if (polling) {
         const flash = document.getElementById('flash');
-        if (flash) flash.innerHTML = `<div class="notice err">Could not refresh analysis: ${esc(err.message)}. Retrying…</div>`;
+        if (flash) flash.innerHTML = `<div class="notice err">분석 상태를 새로 고치지 못했습니다: ${esc(err.message)}. 다시 시도합니다…</div>`;
         detailPollTimer = setTimeout(() => { if (detailID === id) renderDetail(id, true); }, 2500);
         return;
       }
       view.innerHTML = `
-        <a class="back-link" href="#/">← Incidents</a>
-        <div class="notice err">Failed to load incident: ${esc(err.message)}</div>`;
+        <a class="back-link" href="#/">← 인시던트 목록</a>
+        <div class="notice err">인시던트를 불러오지 못했습니다: ${esc(err.message)}</div>`;
       return;
     }
 
@@ -407,94 +456,30 @@
     const waitingToStart = requestedAnalysis && requestedAnalysis.id === id;
     const analysis = analysisFor(inc);
     const grafanaURL = safeHTTPURL(inc.links && inc.links.grafana);
-    const sourceURL = safeHTTPURL(inc.generator_url);
-
-    const title = (inc.alert_labels && inc.alert_labels.alertname) || inc.scenario || inc.incident_id;
-    const labels = Object.entries(inc.alert_labels || {}).sort(([a], [b]) => a.localeCompare(b));
-    const evidences = inc.evidence_metrics || [];
-
-    const correlation = inc.correlation_id && inc.correlation_id !== inc.incident_id
-      ? `grouped into ${incidentLink(inc.correlation_id)}`
-      : (inc.correlated_incidents || []).length
-        ? `primary of ${inc.correlated_incidents.map(incidentLink).join(', ')}`
-        : '';
-    const technicalDetailsOpen = polling && Boolean(view.querySelector('details')?.open);
+    // Keep the fold open across polling re-renders.
+    const foldOpen = polling && Boolean(view.querySelector('details.fold')?.open);
 
     view.innerHTML = `
-      <a class="back-link" href="#/">← Incidents</a>
+      <a class="back-link" href="#/">← 인시던트 목록</a>
       <div class="detail-head">
         <div>
-          <h1 class="detail-title">${esc(title)}</h1>
+          <h1 class="detail-title">${esc(inc.scenario_name || inc.incident_id)}</h1>
           <div class="badge-row">
-            ${severityBadge(inc.severity)}
             ${statusBadge(inc.alert_status)}
             ${holmesBadge(analysis.source_holmes_status)}
             <span class="page-sub mono">${esc(inc.incident_id)}</span>
           </div>
         </div>
         <div class="btn-row">
-          <button class="btn primary" id="btn-pdf">Download PDF</button>
-          ${grafanaURL ? `<a class="btn" href="${esc(grafanaURL)}" target="_blank" rel="noopener noreferrer">View in Grafana</a>` : ''}
-          <button class="btn" id="btn-holmes" ${waitingToStart ? 'disabled' : ''}>Reanalyze</button>
+          <button class="btn primary" id="btn-pdf">PDF 다운로드</button>
+          <button class="btn" id="btn-holmes" ${waitingToStart ? 'disabled' : ''}>재분석</button>
         </div>
       </div>
-      <div id="flash">${waitingToStart ? '<div class="notice ok">Reanalysis queued. Waiting to start…</div>' : ''}</div>
+      <div id="flash">${waitingToStart ? '<div class="notice ok">재분석을 요청했습니다. 시작을 기다리는 중…</div>' : ''}</div>
 
-      ${diagnosisSummary(inc, analysis)}
-
-      ${rootCauseCard(inc, analysis)}
-
-      <details${technicalDetailsOpen ? ' open' : ''}>
-      <summary class="section-sub">Technical details</summary>
-      <div class="card">
-        <div class="card-head"><h2 class="card-title">Incident information</h2></div>
-        <div class="card-body">
-          <p><a class="btn" href="/incidents/${esc(encodeURIComponent(inc.incident_id))}/report.md" target="_blank" rel="noopener noreferrer">Markdown report</a>
-          ${sourceURL ? `<a class="btn" href="${esc(sourceURL)}" target="_blank" rel="noopener noreferrer">Source query</a>` : ''}</p>
-          <div class="meta-grid">
-            <div class="meta-item"><div class="k">Rule / scenario</div><div class="v">${esc(inc.rule_id || '-')} / ${esc(inc.scenario || '-')}</div></div>
-            <div class="meta-item"><div class="k">Cluster</div><div class="v">${esc(inc.cluster || '-')}</div></div>
-            <div class="meta-item"><div class="k">Started</div><div class="v">${fmtTime(inc.starts_at)}</div></div>
-            <div class="meta-item"><div class="k">Ended</div><div class="v">${inc.ends_at ? fmtTime(inc.ends_at) : '-'}</div></div>
-            <div class="meta-item"><div class="k">Nodes</div><div class="v">${esc((inc.affected_nodes || []).join(', ') || '-')}</div></div>
-            <div class="meta-item"><div class="k">Services</div><div class="v">${esc((inc.affected_services || []).join(', ') || '-')}</div></div>
-            <div class="meta-item"><div class="k">Recovery</div><div class="v">${esc(inc.recovery_status || '-')}</div></div>
-            <div class="meta-item"><div class="k">Deliveries</div><div class="v">${esc(inc.delivery_count ?? '-')}</div></div>
-            <div class="meta-item"><div class="k">This incident's investigation</div><div class="v">${esc(inc.holmes_status || 'not run')}</div></div>
-            ${correlation ? `<div class="meta-item"><div class="k">Correlation</div><div class="v">${correlation}</div></div>` : ''}
-          </div>
-          <div class="rc-stats">
-            ${inc.holmes_model ? rcStat('Model', inc.holmes_model) : ''}
-            ${inc.holmes_tool_calls ? rcStat('Tool calls', inc.holmes_tool_calls) : ''}
-            ${inc.holmes_total_tokens ? rcStat('Tokens', fmtTok(inc.holmes_total_tokens), '', `${fmtTok(inc.holmes_prompt_tokens || 0)} in · ${fmtTok(inc.holmes_completion_tokens || 0)} out`) : ''}
-            ${inc.holmes_cost_usd ? rcStat('Cost', fmtCost(inc.holmes_cost_usd)) : ''}
-          </div>
-          ${inc.holmes_error ? `<p class="notice err">${esc(inc.holmes_error)}</p>` : ''}
-        </div>
-      </div>
-
-      ${evidences.length ? `
-      <div class="card">
-        <div class="card-head"><h2 class="card-title">Evidence collected by NetworkDoctor</h2></div>
-        <div class="card-body">
-          ${evidences.map((e) => `
-            <div class="evidence-item">
-              <b>${esc(e.metric)}</b> — ${esc(e.observation)}
-              <code class="evidence-q">${esc(e.query)}</code>
-            </div>`).join('')}
-        </div>
-      </div>` : ''}
-
-      ${labels.length ? `
-      <div class="card">
-        <div class="card-head"><h2 class="card-title">Alert labels</h2></div>
-        <table class="kv-table">
-          <tbody>
-            ${labels.map(([k, v]) => `<tr><td class="mono">${esc(k)}</td><td class="mono">${esc(v)}</td></tr>`).join('')}
-          </tbody>
-        </table>
-      </div>` : ''}
-      </details>`;
+      ${summaryCard(inc, analysis, grafanaURL)}
+      ${analysisCards(inc, analysis)}
+      ${detailsFold(inc, foldOpen)}`;
 
     document.getElementById('btn-pdf').addEventListener('click', () => downloadPDF(inc));
     document.getElementById('btn-holmes').addEventListener('click', () => reinvestigate(inc));
@@ -533,10 +518,10 @@
     const overlay = document.getElementById('pdf-overlay');
     btn.disabled = true;
     const prev = btn.textContent;
-    btn.textContent = 'Generating…';
+    btn.textContent = '생성 중…';
     try {
       const res = await fetch(`/incidents/${encodeURIComponent(inc.incident_id)}/report.md`);
-      if (!res.ok) throw new Error(`failed to fetch report (${res.status})`);
+      if (!res.ok) throw new Error(`레포트를 가져오지 못했습니다 (${res.status})`);
       const md = await res.text();
 
       overlay.classList.add('show');
@@ -552,7 +537,7 @@
         pagebreak: { mode: ['css', 'legacy'] },
       }).from(root).save();
     } catch (err) {
-      flash.innerHTML = `<div class="notice err">PDF generation failed: ${esc(err.message)}</div>`;
+      flash.innerHTML = `<div class="notice err">PDF 생성 실패: ${esc(err.message)}</div>`;
     } finally {
       root.style.display = '';
       root.innerHTML = '';
