@@ -15,3 +15,6 @@ internal/bpf/bpf_*.go
 
 # experiment artifacts (local only — cluster-internal data)
 runs/
+
+# Brainstorming mockups (local only)
+.superpowers/
