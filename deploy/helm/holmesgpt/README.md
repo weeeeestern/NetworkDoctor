@@ -4,7 +4,7 @@ Wrapper around the official `holmes` chart 0.38.1 (vendored in `charts/`).
 
 ```text
 Holmes pod (ns holmesgpt)
-  init: fetch-skills  git clone --sparse skills/  -> emptyDir -> /etc/holmes/networkdoctor-skills
+  init: fetch-skills  git fetch SKILLS_REF, sparse skills/  -> emptyDir -> /etc/holmes/networkdoctor-skills
   env:  LLM_GATEWAY_KEY (Secret holmes-llm), MODEL=gateway-sonnet
   LLM:  http://192.168.0.21:4000/v1   (LiteLLM gateway, deploy/llm-gateway/)
   metrics: prometheus-stack-kube-prom-prometheus.monitoring.svc:9090
@@ -45,8 +45,8 @@ curl -s localhost:8080/api/chat -H 'Content-Type: application/json' -d '{
 
 ## Skill updates
 
-Skills are fetched at pod start. After merging a skill change to `main`:
-
-```bash
-kubectl -n holmesgpt rollout restart deploy/holmesgpt-holmes
-```
+Skills are fetched at pod start from `SKILLS_REF` (branch, tag or full SHA).
+A merge that touches `skills/` runs the `skills-pin` workflow, which rewrites
+the `# ci: skills-ref` line in `values.yaml` to that commit (`[skip ci]`).
+The pod template changes, so Argo CD shows `holmesgpt` OutOfSync; sync it to
+roll Holmes onto the new skills.

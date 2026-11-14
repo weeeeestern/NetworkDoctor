@@ -29,7 +29,7 @@ jobs:
   image:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # bump-lab-image.sh pushes the pinned tag to main
+      contents: write   # bump-lab-pin.sh pushes the pinned tag to main
     steps:
       - uses: actions/checkout@v4
 
@@ -72,4 +72,4 @@ jobs:
       # Pin the lab to the image just pushed (main only).
       - name: Pin lab values to main-<sha>
         if: github.ref == 'refs/heads/main'
-        run: .github/scripts/bump-lab-image.sh backend-image "main-${GITHUB_SHA::7}"
+        run: .github/scripts/bump-lab-pin.sh deploy/helm/networkdoctor/values-onprem-lab.yaml tag backend-image "main-${GITHUB_SHA::7}"
