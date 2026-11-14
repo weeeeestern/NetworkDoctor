@@ -15,6 +15,13 @@ on:
     paths:
       - "skills/**"
 
+# Runs edit the same line, so overlapping ones would conflict on rebase and
+# could leave an older SHA pinned. Queue them instead; each one checks out the
+# latest main, so a queued run pins whatever is newest when it starts.
+concurrency:
+  group: skills-pin
+  cancel-in-progress: false
+
 jobs:
   pin:
     if: github.ref == 'refs/heads/main'
@@ -24,9 +31,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: main        # latest main, not the triggering commit
           fetch-depth: 0   # git log -- skills needs history
 
       - name: Pin SKILLS_REF to the last skills/ commit
         run: |
-          sha="$(git log -1 --format=%H -- skills)"
+          # --first-parent: the commit on main, not one from a merged PR branch
+          sha="$(git log -1 --first-parent --format=%H -- skills)"
           .github/scripts/bump-lab-pin.sh deploy/helm/holmesgpt/values.yaml value skills-ref "\"${sha}\""
