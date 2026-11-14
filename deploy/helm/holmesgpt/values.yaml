@@ -88,7 +88,7 @@ holmes:
         # this to the commit that last changed skills/ on main, so the pod
         # template changes and Argo CD shows Holmes OutOfSync.
         - name: SKILLS_REF
-          value: "main"  # ci: skills-ref
+          value: "c3d5a60e44158ff18d95bb086f84fd16684555f7"  # ci: skills-ref
       command:
         - sh
         - -c
