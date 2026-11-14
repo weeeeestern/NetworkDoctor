@@ -8,7 +8,8 @@ grafana:
   # Lab Grafana NodePort over Tailscale.
   url: http://100.122.175.35:32435
 ui:
-  url: ""
+  # Backend NodePort over Tailscale (backend.service below).
+  url: http://100.122.175.35:30808
 slack:
   enabled: true
   # #incidents in the team workspace.
@@ -93,6 +94,10 @@ backend:
   # The key Secret (jev-api) is optional: without it derived+jev is skipped.
   jev:
     enabled: true
+  # Opens the incident UI to browsers so Slack's report links work.
+  service:
+    type: NodePort
+    nodePort: 30808
   persistence:
     # Lab storage comes from the local-path-provisioner child app (default
     # StorageClass `local-path`). storageClass is left empty on purpose so the
