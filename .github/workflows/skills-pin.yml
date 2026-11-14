@@ -1,0 +1,41 @@
+name: skills-pin
+
+# Pin the Holmes skills fetch (SKILLS_REF in deploy/helm/holmesgpt/values.yaml)
+# to the commit that last changed skills/ on main. The init container clones
+# skills at pod start, so with a fixed "main" ref a skill change never touches
+# the rendered manifest: Argo CD stays Synced and Holmes keeps the skills from
+# its last restart. Pinning the SHA changes the pod template, so Argo CD shows
+# Holmes OutOfSync and a sync rolls it.
+
+on:
+  # Manual run (Actions tab -> skills-pin -> Run workflow) for the first pin.
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "skills/**"
+
+# Runs edit the same line, so overlapping ones would conflict on rebase and
+# could leave an older SHA pinned. Queue them instead; each one checks out the
+# latest main, so a queued run pins whatever is newest when it starts.
+concurrency:
+  group: skills-pin
+  cancel-in-progress: false
+
+jobs:
+  pin:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # bump-lab-pin.sh pushes the pinned ref to main
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main        # latest main, not the triggering commit
+          fetch-depth: 0   # git log -- skills needs history
+
+      - name: Pin SKILLS_REF to the last skills/ commit
+        run: |
+          # --first-parent: the commit on main, not one from a merged PR branch
+          sha="$(git log -1 --first-parent --format=%H -- skills)"
+          .github/scripts/bump-lab-pin.sh deploy/helm/holmesgpt/values.yaml value skills-ref "\"${sha}\""

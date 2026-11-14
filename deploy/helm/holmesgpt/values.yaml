@@ -84,16 +84,23 @@ holmes:
       env:
         - name: SKILLS_REPO
           value: https://github.com/weeeeestern/NetworkDoctor.git
+        # Branch, tag or full commit SHA. The skills-pin workflow rewrites
+        # this to the commit that last changed skills/ on main, so the pod
+        # template changes and Argo CD shows Holmes OutOfSync.
         - name: SKILLS_REF
-          value: main
+          value: "main"  # ci: skills-ref
       command:
         - sh
         - -c
         - |
           set -eu
-          git clone --quiet --depth 1 --filter=blob:none --sparse --branch "$SKILLS_REF" "$SKILLS_REPO" /tmp/repo
+          # init + fetch instead of clone --branch, which rejects commit SHAs
+          git init --quiet /tmp/repo
           cd /tmp/repo
+          git remote add origin "$SKILLS_REPO"
           git sparse-checkout set skills
+          git fetch --quiet --depth 1 --filter=blob:none origin "$SKILLS_REF"
+          git checkout --quiet FETCH_HEAD
           cp -r skills/. /skills/
           echo "fetched $(ls /skills | wc -l) skills from $SKILLS_REF @ $(git rev-parse --short HEAD)"
       volumeMounts:
