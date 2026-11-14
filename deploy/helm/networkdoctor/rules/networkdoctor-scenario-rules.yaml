@@ -29,15 +29,17 @@ groups:
       # ---------------------------------------------------------------- Rule 1
       - alert: NetworkDoctorNetworkCongestion
         expr: |
-          (
-            histogram_quantile(0.99,
-              sum by (le, namespace, service, node) (rate(http_request_duration_seconds_bucket[5m])))
-            > 0.5
-          )
-          and on (node)
-          (
-            sum by (node) (rate(ebpf_tcp_retransmits_total[5m])) > 0.2
-          )
+          label_replace(
+            (
+              histogram_quantile(0.99,
+                sum by (le, namespace, service, node) (rate(http_request_duration_seconds_bucket[5m])))
+              > 0.5
+            )
+            and on (node)
+            (
+              sum by (node) (rate(ebpf_tcp_retransmits_total[5m])) > 0.2
+            ),
+            "target_namespace", "$1", "namespace", "(.*)")
         for: 3m
         labels:
           severity: warning
