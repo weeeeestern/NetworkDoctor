@@ -4,6 +4,7 @@ package links
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
@@ -78,7 +79,9 @@ func (b *Builder) For(inc *incident.Incident) Links {
 	if inc.RuleID != "rule-6" {
 		seen := map[string]bool{}
 		for _, node := range inc.AffectedNodes {
-			if node != "" && !seen[node] {
+			// AffectedNodes falls back to the instance IP when the alert has
+			// no node label; the dashboards' node variable only knows names.
+			if node != "" && !seen[node] && net.ParseIP(node) == nil {
 				q.Add("var-node", node)
 				seen[node] = true
 			}

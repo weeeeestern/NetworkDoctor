@@ -117,3 +117,18 @@ func TestNewRejectsUnsafeOrAmbiguousBases(t *testing.T) {
 		}
 	}
 }
+
+func TestInstanceIPFallbackIsNotANodeFilter(t *testing.T) {
+	b, err := New("https://dash.example", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inc := &incident.Incident{RuleID: "rule-2", StartsAt: time.Date(2026, 11, 9, 1, 0, 0, 0, time.UTC), AffectedNodes: []string{"192.168.0.18"}}
+	u, err := url.Parse(b.For(inc).Grafana)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := u.Query()["var-node"]; len(got) != 0 {
+		t.Fatalf("var-node = %v, want none for an instance IP", got)
+	}
+}

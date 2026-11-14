@@ -111,7 +111,7 @@ func TestWorkerPersistsBeforeHTTPAndSendsOneParentForRepeatedScans(t *testing.T)
 		t.Fatal("ack overwrote concurrent recovery update")
 	}
 	text := f.sender.messages[0].Text
-	if !strings.Contains(text, "Incident detected") || !strings.Contains(text, "&lt;!here&gt;") || !strings.Contains(text, "node&amp;1") || strings.Contains(text, "Cause:") {
+	if !strings.Contains(text, "장애 감지") || !strings.Contains(text, "&lt;!here&gt;") || !strings.Contains(text, "node&amp;1") || strings.Contains(text, "추정 원인") {
 		t.Fatalf("unsafe or premature parent: %s", text)
 	}
 }
@@ -171,10 +171,10 @@ func TestWorkerGroupMembersAndLateJoinEachHaveOwnThread(t *testing.T) {
 		for _, m := range f.sender.messages {
 			if m.ThreadTS == r.Parent.TS {
 				found = true
-				if id != primary.IncidentID && !strings.Contains(m.Text, "Related group analysis") {
+				if id != primary.IncidentID && !strings.Contains(m.Text, "함께 묶인 알림의 분석 결과") {
 					t.Fatal("shared analysis not labeled")
 				}
-				if id != primary.IncidentID && !strings.Contains(m.Text, "Representative incident: "+primary.IncidentID) {
+				if id != primary.IncidentID && !strings.Contains(m.Text, "대표 인시던트: "+primary.IncidentID) {
 					t.Fatal("shared analysis does not identify its representative source")
 				}
 			}

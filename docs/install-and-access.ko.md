@@ -295,8 +295,8 @@ Grafana는 기존 관리자가 마련한 계정으로 로그인합니다. Networ
 ## 7. Slack 원글 → 분석 댓글 → UI → PDF 확인
 
 1. UI 목록이 열리고, Grafana에서 `nd-rule-1`~`nd-rule-8`이 표시되며 데이터 소스로부터 그래프를 가져오는지 확인합니다.
-2. 테스트 클러스터에서 새 Rule 7 장애를 발생시킵니다. Slack의 `Incident detected` 원글과 `Open Grafana` 링크를 확인합니다.
-3. Holmes가 분석을 완료하면 **같은 원글의 스레드**에 `Analysis ready`와 `View latest report`가 도착하는지 확인합니다.
+2. 테스트 클러스터에서 새 Rule 7 장애를 발생시킵니다. Slack의 `장애 감지` 원글과 `Grafana에서 보기` 링크를 확인합니다.
+3. Holmes가 분석을 완료하면 **같은 원글의 스레드**에 `원인 분석 완료`와 `레포트 보기`가 도착하는지 확인합니다.
 4. UI 상세에서 증상·추정 원인·근거·배제한 원인·조치를 확인하고 PDF 다운로드를 누릅니다. PC에 저장된 PDF를 열어 페이지를 넘기며 글이 누락되는지 확인합니다.
 
 Grafana 링크는 `…/d/nd-rule-N?from=…&to=…&var-node=…`, 보고서 링크는 `…/#/incident/인시던트ID`입니다. 백엔드가 발생 시각·노드로 생성하므로 사용자가 매번 URL을 조립할 필요는 없습니다.

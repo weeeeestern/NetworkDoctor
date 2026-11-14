@@ -112,14 +112,14 @@ configured channel affects only future enrollment.
    audience will use. Check both dashboards and metric data before fault injection.
 2. Inject one approved scenario using `scripts/repro/` in the dedicated demo target.
    Let that scenario finish before starting another scenario or manual reanalysis.
-3. Expect one **Incident detected** parent for each incident. Open **Open Grafana**.
+3. Expect one **장애 감지** parent for each incident. Open **Grafana에서 보기**.
    The URL uses the incident's own node/service and ten minutes around its event
    window. Rule 6 keeps the dashboard's All-node default for comparison; Rule 1
    includes both affected and retransmit nodes when available.
-4. When Holmes finishes with a root cause, expect **Analysis ready** in the same
+4. When Holmes finishes with a root cause, expect **원인 분석 완료** in the same
    thread. Shared group analysis is explicitly labelled as related analysis, not
    proof that every member was individually verified. Recovery is each incident's own.
-5. Open **View latest report**, read symptom, cause and evidence, and download PDF.
+5. Open **레포트 보기**, read symptom, cause and evidence, and download PDF.
    The report follows the latest available analysis; it is not pinned to the Slack
    message's version. Reanalysis may add a later completion reply to the same thread.
 6. Repeat the same webhook if testing delivery: it must not create another parent.
