@@ -271,6 +271,8 @@ backend:
   service:
     type: ClusterIP
     port: 8080
+    # Fixed node port when type is NodePort; empty lets Kubernetes pick one.
+    nodePort: ""
     annotations: {}
 
   config:
