@@ -102,7 +102,8 @@ func intField(m map[string]any, key string) int {
 // term spellings follow the Kubernetes Korean localization guide; keys, enum
 // values and identifiers stay as they are so parsing and eval keep working.
 const koreanOutputRules = `Write every free-text value in the yaml block (summary, root_cause, observation, reason, hypothesis, recommended_actions, additional_checks) in natural Korean, as an on-call engineer would write it:
-- summary has two one-line fields. summary.symptom: what users saw, with the number and its usual level, e.g. "catshop 응답 지연 1.8s (평소 120ms)". summary.cause: confirmed -> the cause, e.g. "worker1 NIC 혼잡으로 TCP 재전송 급증"; excluded -> why this scenario is not it, plus the likelier cause if seen; inconclusive -> what was missing to decide.
+- summary has two fields. summary.symptom: one line, what users saw, with the number and its usual level, e.g. "catshop 응답 지연 1.8s (평소 120ms)". summary.cause: one or two complete sentences an operator understands at a glance, in the order what happened, then why, then the effect, e.g. "worker1에서 패킷이 손실돼 TCP 재전송이 늘었고, 그 때문에 catshop 응답이 늦어졌습니다." confirmed -> the cause; excluded -> the likelier cause, then in a few words why this scenario does not explain it; inconclusive -> what was missing to decide.
+- In summary only: call services and pods by their short name (catshop, nd-r1b-front), never the FQDN; say timeout as 시간 초과 and other English jargon in plain Korean; no noun chains such as "DNS 조회 timeout과 backend 호출 취소".
 - Short, direct sentences ending in "~했습니다/~입니다". State what the data shows; do not hedge with "~로 보입니다/~할 수 있습니다" when the numbers are clear.
 - No translation-ese: avoid "~에 대해", "~를 통해", "~에 있어", "~에 의해", "~되어지다", "가지고 있다", "~에서의". Use plain verbs instead of nominalizations.
 - No filler: no "결론적으로/따라서/즉" openers, no "주목할 만합니다", no emoji, no em dash.

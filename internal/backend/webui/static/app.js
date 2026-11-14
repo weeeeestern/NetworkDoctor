@@ -111,7 +111,7 @@
     if (pending) return `<div class="cause-line pending">${pending}</div>`;
     const h = i.headline || {};
     if (h.cause) {
-      const prefix = h.cause_label && h.cause_label !== '추정 원인' ? `${h.cause_label}: ` : '';
+      const prefix = h.verdict && !h.verdict.endsWith('맞음') ? `${h.verdict} · ` : '';
       return `<div class="cause-line">→ ${esc(prefix)}${esc(h.cause)}</div>`;
     }
     return i.holmes_status === 'failed' ? '<div class="cause-line pending">원인 분석 실패</div>' : '';
@@ -308,7 +308,7 @@
     const waiting = { queued: '원인 분석 대기 중…', running: '원인 분석 중…' }[state];
     let causeBlock;
     if (h.cause) {
-      causeBlock = `<div class="sum-k">${analysis.previous ? '이전 분석 · ' : ''}${esc(h.cause_label)}</div><div class="sum-v cause">${esc(h.cause)}</div>`;
+      causeBlock = `<div class="sum-k">${analysis.previous ? '이전 분석 · ' : ''}${h.verdict ? `${esc(h.verdict)} · ` : ''}${esc(h.cause_label)}</div><div class="sum-v cause">${esc(h.cause)}</div>`;
     } else {
       const msg = analysis.unavailable ? '함께 묶인 대표 인시던트의 분석을 찾을 수 없습니다'
         : waiting || (state === 'failed' ? '원인 분석에 실패했습니다' : '아직 분석하지 않았습니다');

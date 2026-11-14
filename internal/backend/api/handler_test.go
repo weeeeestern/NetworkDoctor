@@ -326,12 +326,12 @@ func TestDetailAndReportUseGroupAnalysis(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	for _, want := range []string{"inc-222222222222", "복구됨", "Member DNS symptom", "member-node", "Shared link saturated", "inc-111111111111", "이 시나리오 아님", "primary-model", "431", "primary observation"} {
+	for _, want := range []string{"inc-222222222222", "복구됨", "Member DNS symptom", "member-node", "Shared link saturated", "inc-111111111111", "**판단** · 이 시나리오 아님", "primary-model", "431", "primary observation"} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("group report missing %q: %s", want, body)
 		}
 	}
-	if strings.Contains(string(body), "**추정 원인**") {
+	if strings.Contains(string(body), "맞음") {
 		t.Error("completed excluded result must not become confirmed")
 	}
 	// A member that receives its own manual investigation no longer borrows the primary.

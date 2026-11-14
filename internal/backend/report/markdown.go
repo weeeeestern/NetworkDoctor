@@ -31,6 +31,9 @@ func MarkdownWithResult(inc *incident.Incident, view incident.ResultView) string
 	fmt.Fprintf(&b, "_%s · %s · %s 생성_\n\n", inc.IncidentID, inc.Cluster, time.Now().UTC().Format(time.RFC3339))
 
 	fmt.Fprintf(&b, "**증상** · %s\n\n", h.Symptom)
+	if h.Verdict != "" {
+		fmt.Fprintf(&b, "**판단** · %s\n\n", h.Verdict)
+	}
 	if h.Cause != "" {
 		label := h.CauseLabel
 		if view.Previous {

@@ -347,3 +347,17 @@ func TestWorkerFailedAcknowledgementNeverBlindRetries(t *testing.T) {
 		t.Fatal("restart did not pause ambiguous delivery")
 	}
 }
+
+func TestReplyTextReadsAsVerdictCauseAndIncidentState(t *testing.T) {
+	w := NewWorker(Options{})
+	inc := &incident.Incident{Scenario: "network-congestion", RecoveryStatus: incident.RecoveryOpen}
+	text := w.replyText(inc, incident.ResultView{Result: map[string]any{
+		"investigation_status": "excluded",
+		"confidence":           "high",
+		"summary":              map[string]any{"cause": "front 파드가 catshop 주소를 찾지 못해 요청이 늦어졌습니다."},
+	}})
+	want := "*원인 분석 완료*\n판단: 네트워크 혼잡 아님 · 신뢰도 높음\n추정 원인: front 파드가 catshop 주소를 찾지 못해 요청이 늦어졌습니다.\n장애 상태: 아직 진행 중"
+	if text != want {
+		t.Fatalf("reply =\n%s\nwant\n%s", text, want)
+	}
+}

@@ -307,12 +307,22 @@ func (w *Worker) replyText(i *incident.Incident, view incident.ResultView) strin
 		text += "\n함께 묶인 알림의 분석 결과입니다 (이 알림을 따로 검증하지는 않음)"
 		text += "\n대표 인시던트: " + escape(view.SourceIncidentID)
 	}
-	text += "\n" + escape(h.CauseLabel) + ": " + escape(h.Cause)
-	if c := incident.ConfidenceName(conf); c != "" {
+	c := incident.ConfidenceName(conf)
+	switch {
+	case h.Verdict != "" && c != "":
+		text += "\n판단: " + escape(h.Verdict) + " · 신뢰도 " + c
+	case h.Verdict != "":
+		text += "\n판단: " + escape(h.Verdict)
+	case c != "":
 		text += "\n신뢰도: " + c
 	}
-	recovery := map[string]string{incident.RecoveryOpen: "진행 중", incident.RecoveryResolved: "복구됨"}[i.RecoveryStatus]
-	text += "\n상태: " + escape(firstNonEmpty(recovery, i.RecoveryStatus))
+	if h.Cause != "" {
+		text += "\n" + escape(h.CauseLabel) + ": " + escape(h.Cause)
+	}
+	// "장애 상태" because a bare "상태: 진행 중" under "원인 분석 완료" reads
+	// as if the analysis were still running.
+	recovery := map[string]string{incident.RecoveryOpen: "아직 진행 중", incident.RecoveryResolved: "복구됨"}[i.RecoveryStatus]
+	text += "\n장애 상태: " + escape(firstNonEmpty(recovery, i.RecoveryStatus))
 	if url := w.o.Links.For(i).Incident; url != "" {
 		text += "\n<" + escape(url) + "|레포트 보기>"
 	}
