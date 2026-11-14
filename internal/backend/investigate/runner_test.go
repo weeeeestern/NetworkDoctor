@@ -252,7 +252,7 @@ func TestRunnerCollectsEvidenceAsksHolmesOnceAndParses(t *testing.T) {
 	if strings.Count(md, "refusing destination") != 1 {
 		t.Errorf("root_cause should appear once, as the headline")
 	}
-	for _, want := range []string{"# NetworkDoctorTCPRetransmitBurstHigh", "**이 시나리오 아님** · Connect failures to a refusing destination", "## 배제한 원인", "### NetworkDoctor 수집 지표"} {
+	for _, want := range []string{"# NetworkDoctorTCPRetransmitBurstHigh", "**판단** · 이 시나리오 아님", "**추정 원인** · Connect failures to a refusing destination", "## 배제한 원인", "### NetworkDoctor 수집 지표"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("report is missing %q", want)
 		}

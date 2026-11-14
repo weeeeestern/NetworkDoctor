@@ -21,7 +21,7 @@ func TestHeadline(t *testing.T) {
 		{"root_cause fallback", Incident{
 			SymptomSummary: "p99 high",
 			HolmesResult:   map[string]any{"investigation_status": "confirmed", "root_cause": " link congestion "},
-		}, Headline{Symptom: "p99 high", CauseLabel: "추정 원인", Cause: "link congestion"}},
+		}, Headline{Symptom: "p99 high", Verdict: "이 시나리오 맞음", CauseLabel: "추정 원인", Cause: "link congestion"}},
 		{"summary wins", Incident{
 			SymptomSummary: "p99 high",
 			HolmesResult: map[string]any{
@@ -29,7 +29,15 @@ func TestHeadline(t *testing.T) {
 				"root_cause":           "long paragraph",
 				"summary":              map[string]any{"symptom": "catshop 응답 지연", "cause": "앱이 직접 500 반환"},
 			},
-		}, Headline{Symptom: "catshop 응답 지연", CauseLabel: "이 시나리오 아님", Cause: "앱이 직접 500 반환"}},
+		}, Headline{Symptom: "catshop 응답 지연", Verdict: "이 시나리오 아님", CauseLabel: "추정 원인", Cause: "앱이 직접 500 반환"}},
+		{"verdict names the scenario", Incident{
+			Scenario:     "network-congestion",
+			HolmesResult: map[string]any{"investigation_status": "excluded", "root_cause": "DNS 시간 초과"},
+		}, Headline{Symptom: "네트워크 혼잡", Verdict: "네트워크 혼잡 아님", CauseLabel: "추정 원인", Cause: "DNS 시간 초과"}},
+		{"inconclusive", Incident{
+			Scenario:     "application-induced-network-bottleneck",
+			HolmesResult: map[string]any{"investigation_status": "inconclusive", "root_cause": "로그 없음"},
+		}, Headline{Symptom: "애플리케이션발 네트워크 병목", Verdict: "판단 보류", CauseLabel: "보류 이유", Cause: "로그 없음"}},
 		{"unknown status", Incident{
 			Scenario:     "coredns-degradation",
 			HolmesResult: map[string]any{"root_cause": "x"},

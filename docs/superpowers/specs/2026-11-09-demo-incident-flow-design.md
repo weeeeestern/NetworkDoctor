@@ -91,10 +91,13 @@ Grafana 룰 대시보드(Trigger / Supporting / Exclusion, 발화 구간 표시)
   - 문장: 번역투·상투어 금지. NomaDamas/k-skill `korean-humanizer`의 핵심 규칙에서 추린다(라이선스 확인 후).
   - 용어: [쿠버네티스 한글화 모범 사례](https://kubernetes.io/ko/docs/contribute/localization_ko_best_practice/)를 따른다(파드, 노드, 서비스 등).
   - 그대로 두는 것: 지표명, 리소스명, 라벨 값, 필드 키(`rule_id`, `confirmed` 등 enum 포함)
-- **결론별 표시.** 두 번째 줄의 라벨과 문장은 `investigation_status`에 따라 바뀐다. UI, Slack, 레포트가 모두 같은 규칙을 따른다.
-  - `confirmed`: 라벨 **추정 원인**, `summary.cause`에는 원인을 쓴다.
-  - `excluded`: 라벨 **이 시나리오 아님**, `summary.cause`에는 배제한 이유와, 보이면 더 그럴듯한 원인을 쓴다.
-  - `inconclusive`: 라벨 **원인 불확실**, `summary.cause`에는 무엇이 모자라서 판단을 못 했는지 쓴다.
+- **결론별 표시.** 판단 줄과 원인 줄을 나눈다. 판단 줄은 `investigation_status`를 시나리오 이름이 들어간 말로 바꾼다. UI, Slack, 레포트가 모두 같은 규칙을 따른다.
+  - `confirmed`: 판단 **{시나리오} 맞음**, 라벨 **추정 원인**, `summary.cause`에는 원인을 쓴다.
+  - `excluded`: 판단 **{시나리오} 아님**, 라벨 **추정 원인**, `summary.cause`에는 더 그럴듯한 원인과, 이 시나리오가 아닌 이유를 짧게 쓴다.
+  - `inconclusive`: 판단 **판단 보류**, 라벨 **보류 이유**, `summary.cause`에는 무엇이 모자라서 판단을 못 했는지 쓴다.
+  - (2026-11-15 변경) 처음에는 라벨을 `이 시나리오 아님`·`원인 불확실`로 두었다. Rule 1 재현에서 "이 시나리오 아님: catshop.networkdoctor-demo.svc DNS 조회 timeout과 …"처럼 무엇이 아니라는 건지, 원인이 무엇인지 한 번에 읽히지 않아 바꿨다.
+  - `summary.cause`는 "무엇이 → 왜 → 결과" 순서의 완결된 문장 한두 개로 쓴다. 서비스·파드는 짧은 이름으로, timeout 같은 말은 쉬운 한국어로 쓴다.
+  - Slack 댓글의 복구 줄은 `장애 상태: 아직 진행 중 | 복구됨`이다. `상태: 진행 중`은 "원인 분석 완료" 아래에서 분석이 진행 중인 것처럼 읽혔다.
 - `summary`가 없는 옛 결과는 `symptom_summary`(알림 annotation)와 `root_cause`로 대신 보여준다.
 
 ### 3.4 인시던트 UI: 상세 화면 (위→아래)
