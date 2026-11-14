@@ -10,9 +10,11 @@ grafana:
 ui:
   url: ""
 slack:
-  enabled: false
-  channelID: ""
-  existingSecret: ""
+  enabled: true
+  # #incidents in the team workspace.
+  channelID: "C0CG7301YEQ"
+  # Created by hand in the networkdoctor namespace on 2026-11-10 (not in Git).
+  existingSecret: networkdoctor-slack-ux-20261110-044544
   botTokenKey: bot-token
 
 agent:
