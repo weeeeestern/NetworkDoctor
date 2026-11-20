@@ -1,0 +1,11 @@
+# EKS uses the monitoring release; the on-prem release remains prometheus-stack.
+serviceMonitor:
+  labels:
+    release: monitoring
+
+app:
+  service:
+    # Load generation and fault scripts use the internal Service. For the UI:
+    # kubectl -n networkdoctor-demo port-forward svc/catshop 9898:9898
+    type: ClusterIP
+    nodePort: null

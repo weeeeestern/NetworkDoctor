@@ -57,7 +57,11 @@ spec:
       {{- end }}
       containers:
         - name: agent
+          {{- if .Values.agent.image.digest }}
+          image: "{{ .Values.agent.image.repository }}@{{ .Values.agent.image.digest }}"
+          {{- else }}
           image: "{{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag | default .Chart.AppVersion }}"
+          {{- end }}
           imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
           args:
             - -iface={{ .Values.agent.iface }}

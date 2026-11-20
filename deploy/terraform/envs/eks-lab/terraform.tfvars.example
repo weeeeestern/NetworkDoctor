@@ -2,9 +2,14 @@
 
 name            = "nd-eks-lab"
 region          = "ap-northeast-2"
-cluster_version = "1.33"
+cluster_version = "1.35"
 
-node_instance_types = ["t3.large"]
-node_min            = 1
-node_desired        = 2
-node_max            = 3
+# Fixed at three workers for incident demos (min = desired = max).
+node_instance_types = ["t3a.medium"]
+node_count          = 3
+
+# Replace the example address with the public IPv4s of the operator and team.
+team_api_cidrs = ["203.0.113.25/32"]
+
+# Optional IAM Identity Center role ARNs for trusted lab operators.
+team_role_arns = []

@@ -23,6 +23,12 @@ spec:
       releaseName: networkdoctor-root
       valueFiles:
         - eks-lab.yaml
+      parameters:
+        # Local child charts use the exact commit rendered by this root app,
+        # including when targetRevision is changed to a topic branch.
+        - name: source.targetRevision
+          value: $ARGOCD_APP_REVISION
+          forceString: true
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
