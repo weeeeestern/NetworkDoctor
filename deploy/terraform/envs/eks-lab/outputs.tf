@@ -20,11 +20,6 @@ output "gateway_address_hint" {
   value       = "kubectl -n ${local.gateway_namespace} get gateway ${local.gateway_name} -o jsonpath='{.status.addresses[0].value}'"
 }
 
-output "stateful_zone" {
-  description = "Zone the Prometheus and backend nodeSelectors must name."
-  value       = var.availability_zones[0]
-}
-
 output "grafana_admin_password" {
   description = "Login for https://grafana.<domain> (user: admin)."
   value       = random_password.grafana_admin.result

@@ -4,10 +4,13 @@ locals {
   # One fixed-size node group per AZ, keyed by the AZ letter ("a", "c").
   # A replaced worker comes back in the same AZ, so EBS-backed pods pinned
   # to that AZ can reschedule onto it.
+  # The first group carries networkdoctor.io/stateful=true, which the
+  # Prometheus and backend nodeSelectors use instead of a zone name.
   node_groups = {
     for i, az in var.availability_zones : substr(az, length(az) - 1, 1) => {
       subnet_id = module.vpc.private_subnets[i]
       size      = var.node_counts[i]
+      labels    = { for k, v in { "networkdoctor.io/stateful" = "true" } : k => v if i == 0 }
     }
   }
 }
@@ -49,6 +52,7 @@ module "workers" {
   subnet_ids             = [each.value.subnet_id]
   instance_types         = var.node_instance_types
   ami_type               = "AL2023_x86_64_STANDARD"
+  labels                 = each.value.labels
   capacity_type          = "ON_DEMAND"
   enable_monitoring      = false # The demo uses Prometheus for monitoring.
 

@@ -147,19 +147,19 @@ aws acm list-certificates --region ap-northeast-2 \
 이미 만들어진 제어 영역은 과금될 수 있다.
 [AWS 온디맨드 할당량](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-on-demand-instances.html#ec2-on-demand-instances-quotas)
 
-저장소 루트에서 시작한다. 기존 `terraform.tfvars`는 보존하고 직접 수정한다.
+저장소 루트에서 시작한다. 랩 스택은 커밋된 변수 기본값으로 실행하며 `terraform.tfvars`가
+필요 없다. 예전 `terraform.tfvars`가 있으면 아래 항목을 확인한 뒤 지운다.
 
-- `admin_role_arns`에 로컬에서 Terraform이나 kubectl을 실행할 역할 ARN을 넣는다.
-  클러스터 관리자는 "클러스터를 만든 주체"가 아니라 GitHub Actions 역할과 이 목록이다.
-  **여기에 없는 역할로 로컬 apply를 하면 클러스터 안 설치 단계에서 권한 오류가 나고
-  kubectl도 쓸 수 없다.** SSO 세션이면 `aws sts get-caller-identity`의 역할 이름으로
-  IAM 콘솔에서 전체 역할 ARN(`…/AWSReservedSSO_…`)을 찾는다. GitHub Actions에서는
-  `TF_ADMIN_ROLE_ARNS` 변수가 이 값이다. 두 곳의 목록을 같게 유지한다. 다르면
-  실행할 때마다 access entry가 추가·삭제된다.
+- `admin_role_arns`(로컬에서 Terraform이나 kubectl을 실행할 IAM 역할·사용자 ARN)는
+  **tfvars에 넣지 않는다.** GitHub Actions는 tfvars를 읽지 못하므로, 로컬에만 있는 값은
+  다음 CI apply가 기본값으로 되돌려 그 신원의 access entry를 지운다. 저장소 변수
+  `TF_ADMIN_ROLE_ARNS`에 넣고 로컬에서도 같은 값을 환경변수로 넘긴다
+  (`export TF_VAR_admin_role_arns='["arn:aws:iam::…"]'`). 클러스터 관리자는 "클러스터를 만든
+  주체"가 아니라 GitHub Actions 역할과 이 목록이다. 둘 다 없으면 계획 단계에서 멈춘다.
+  같은 이유로 `node_counts`·`domain` 등도 tfvars에서 바꾸지 말고 변수 기본값을 고쳐 커밋한다.
 - `domain`은 `envs/dns`와 같은 값으로 둔다.
-- `availability_zones`의 첫 영역을 바꾸면 `deploy/bootstrap/eks-lab.yaml`
-  (Prometheus)과 `deploy/helm/networkdoctor/values-eks-lab.yaml`(backend)의
-  `topology.kubernetes.io/zone` 값도 같이 바꾼다. `terraform output stateful_zone`이 기준이다.
+- `availability_zones`의 첫 영역 노드 그룹에 `networkdoctor.io/stateful=true` 라벨이 붙고,
+  Prometheus와 backend가 이 라벨로 그 노드 그룹에 고정된다. 영역을 바꿔도 Helm 값은 그대로다.
 - 팀 운영자가 직접 접속해야 하면 `team_role_arns`에 IAM 콘솔의 전체 SSO 역할
   ARN(`arn:aws:iam::…:role/…/AWSReservedSSO_…`)을 넣는다.
 
@@ -168,14 +168,7 @@ aws acm list-certificates --region ap-northeast-2 \
 
 ```sh
 cd deploy/terraform/envs/eks-lab
-if [ ! -e terraform.tfvars ]; then
-  cp terraform.tfvars.example terraform.tfvars
-fi
-```
-
-입력값을 확인한 후 계획을 만든다.
-
-```sh
+export TF_VAR_admin_role_arns='["arn:aws:iam::…"]'  # 저장소 변수 TF_ADMIN_ROLE_ARNS와 같은 값
 terraform init -backend-config="bucket=$state_bucket"
 terraform plan -out=lab.tfplan
 terraform show lab.tfplan

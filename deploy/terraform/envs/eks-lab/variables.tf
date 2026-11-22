@@ -21,7 +21,7 @@ variable "cluster_version" {
 }
 
 variable "availability_zones" {
-  description = "Two AZs for the public (ALB, NAT) and private (EKS) subnets. The first one hosts the stateful pods (Prometheus, backend); keep it in sync with the zone nodeSelectors in deploy/bootstrap/eks-lab.yaml and deploy/helm/networkdoctor/values-eks-lab.yaml."
+  description = "Two AZs for the public (ALB, NAT) and private (EKS) subnets. The first one's node group is labelled networkdoctor.io/stateful=true and hosts Prometheus and the backend (EBS)."
   type        = list(string)
   default     = ["ap-northeast-2a", "ap-northeast-2c"]
 

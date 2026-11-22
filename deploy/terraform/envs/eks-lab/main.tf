@@ -63,6 +63,10 @@ module "eks" {
   # the cluster stays reachable from both GitHub Actions and the operator.
   enable_cluster_creator_admin_permissions = false
 
+  # Same reason for the secrets-encryption key: without a list the module
+  # uses the current caller, and CI and local applies would keep swapping it.
+  kms_key_administrators = tolist(local.admin_role_arns)
+
   access_entries = merge(
     {
       for role_arn in var.team_role_arns : role_arn => {
@@ -109,6 +113,17 @@ data "aws_iam_roles" "github_actions_plan" {
 
 locals {
   admin_role_arns = setunion(data.aws_iam_roles.github_actions.arns, var.admin_role_arns)
+}
+
+# Fail the plan instead of creating a cluster nobody can reach: every Helm
+# and kubectl resource below would otherwise stop with Unauthorized.
+resource "terraform_data" "cluster_admin_guard" {
+  lifecycle {
+    precondition {
+      condition     = length(local.admin_role_arns) > 0
+      error_message = "No cluster admin: apply envs/bootstrap (GitHub Actions role) or set admin_role_arns."
+    }
+  }
 }
 
 # ---------------------------------------------------------------------------

@@ -46,8 +46,10 @@ resource "aws_acm_certificate_validation" "this" {
   certificate_arn         = aws_acm_certificate.this.arn
   validation_record_fqdns = [for r in aws_route53_record.acm_validation : r.fqdn]
 
-  # Name server changes at the registrar can take hours to propagate.
+  # Waits for the registrar delegation. Apply this only after
+  # `dig NS <domain>` shows the Route53 servers; a longer wait would outlive
+  # the GitHub Actions job timeout and leave the state lock behind.
   timeouts {
-    create = "3h"
+    create = "60m"
   }
 }

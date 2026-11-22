@@ -51,10 +51,11 @@ applications:
       prometheus:
         prometheusSpec:
           retention: 7d
-          # The EBS volume is zonal. Pin to the first Terraform AZ, whose
-          # node group has two workers, so a node loss reschedules in-zone.
+          # The EBS volume is zonal. Pin to the first AZ's node group (two
+          # workers, label set in Terraform workers.tf), so a node loss
+          # reschedules in-zone.
           nodeSelector:
-            topology.kubernetes.io/zone: ap-northeast-2a
+            networkdoctor.io/stateful: "true"
           # EBS-backed storage; without it Prometheus data dies with the pod.
           storageSpec:
             volumeClaimTemplate:

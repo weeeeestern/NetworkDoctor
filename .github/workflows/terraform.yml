@@ -63,10 +63,11 @@ jobs:
       fail-fast: false
       matrix:
         stack: [bootstrap, dns, eks-lab]
-    # One plan per stack at a time; state locks would make a second one wait.
+    # Separate from the dispatch group, so a PR plan never queues in front of
+    # (or cancels) an apply. A newer push supersedes the PR's older plan.
     concurrency:
-      group: terraform-${{ matrix.stack }}
-      cancel-in-progress: false
+      group: terraform-pr-${{ github.event.pull_request.number }}-${{ matrix.stack }}
+      cancel-in-progress: true
     defaults:
       run:
         shell: bash # -eo pipefail, so `plan | tee` fails when plan fails
@@ -113,7 +114,9 @@ jobs:
   dispatch:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # Above the slowest apply: EKS create/destroy (~30 min) and the dns stack's
+    # 60-minute ACM validation wait. A killed run leaves the S3 lock behind.
+    timeout-minutes: 120
     permissions:
       contents: read
       id-token: write
@@ -125,8 +128,6 @@ jobs:
         shell: bash # -eo pipefail, so `plan | tee` fails when plan fails
         working-directory: deploy/terraform/envs/${{ inputs.stack }}
     env:
-      # Writes need the apply role, which AWS lets only main assume.
-      AWS_ROLE_ARN: ${{ inputs.action == 'plan' && vars.AWS_PLAN_ROLE_ARN || vars.AWS_APPLY_ROLE_ARN }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
     steps:
       - uses: actions/checkout@v4
@@ -135,22 +136,34 @@ jobs:
           terraform_version: 1.15.8
           terraform_wrapper: false
 
-      - name: Check ref and repository variables
+      # Plans use the read-only role; writes need the apply role, which AWS
+      # lets only main assume. Chosen here, not with `a && b || c`, so a
+      # missing plan role fails instead of falling back to the write role.
+      - name: Select role
+        id: role
         env:
           ACTION: ${{ inputs.action }}
+          PLAN_ROLE: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          APPLY_ROLE: ${{ vars.AWS_APPLY_ROLE_ARN }}
         run: |
-          if [ "$ACTION" != plan ] && [ "$GITHUB_REF" != refs/heads/main ]; then
-            echo "::error::$ACTION runs only on main (selected: $GITHUB_REF)"; exit 1
+          if [ "$ACTION" = plan ]; then
+            role=$PLAN_ROLE; var=AWS_PLAN_ROLE_ARN; duration=3600
+          else
+            if [ "$GITHUB_REF" != refs/heads/main ]; then
+              echo "::error::$ACTION runs only on main (selected: $GITHUB_REF)"; exit 1
+            fi
+            role=$APPLY_ROLE; var=AWS_APPLY_ROLE_ARN; duration=7200
           fi
-          [ -n "$AWS_ROLE_ARN" ] || { echo "::error::AWS_PLAN_ROLE_ARN / AWS_APPLY_ROLE_ARN is not set"; exit 1; }
+          [ -n "$role" ] || { echo "::error::$var is not set"; exit 1; }
           [ -n "$TF_STATE_BUCKET" ] || { echo "::error::TF_STATE_BUCKET is not set"; exit 1; }
+          { echo "arn=$role"; echo "duration=$duration"; } >> "$GITHUB_OUTPUT"
 
       - name: AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-to-assume: ${{ steps.role.outputs.arn }}
           aws-region: ${{ env.AWS_REGION }}
-          role-duration-seconds: ${{ inputs.action == 'plan' && 3600 || 7200 }}
+          role-duration-seconds: ${{ steps.role.outputs.duration }}
 
       - name: terraform init
         run: terraform init -backend-config="bucket=$TF_STATE_BUCKET"

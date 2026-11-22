@@ -22,8 +22,8 @@ routes:
     healthCheckPath: /healthz
     methods: [GET, HEAD]
 
-  # Grafana logs in and queries with POST, so all methods are allowed;
-  # access is still limited to the team IPs and Grafana's own login.
+  # Grafana logs in and queries with POST, so all methods are allowed. The
+  # ALB is open to the internet; Grafana's own login is the only gate.
   - name: grafana
     host: grafana
     namespace: monitoring
