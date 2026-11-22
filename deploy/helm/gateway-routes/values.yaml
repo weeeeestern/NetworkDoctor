@@ -1,0 +1,42 @@
+# The Gateway Terraform creates (deploy/terraform/envs/eks-lab/gateway.tf).
+# Its listener only admits routes from the networkdoctor, monitoring and
+# holmesgpt namespaces.
+gateway:
+  name: lab
+  namespace: gateway
+
+# Must match the Terraform `domain` variable. external-dns writes
+# <host>.<domain> into the Route53 zone from each route's hostname.
+domain: netdoc.cloud
+
+# One HTTPRoute + TargetGroupConfiguration per entry, created in the
+# Service's own namespace (that namespace's Argo app must be synced first).
+#   methods  limit the route to these HTTP methods; empty = all methods
+routes:
+  # Read-only from the internet; changes go through port-forward (README).
+  - name: networkdoctor
+    host: nd
+    namespace: networkdoctor
+    service: networkdoctor-backend
+    port: 8080
+    healthCheckPath: /healthz
+    methods: [GET, HEAD]
+
+  # Grafana logs in and queries with POST, so all methods are allowed;
+  # access is still limited to the team IPs and Grafana's own login.
+  - name: grafana
+    host: grafana
+    namespace: monitoring
+    service: monitoring-grafana
+    port: 80
+    healthCheckPath: /api/health
+
+  # HolmesGPT serves an API (POST /api/chat), not a UI. Enable only when it
+  # is deployed and should be reachable from outside the cluster.
+  - name: holmes
+    enabled: false
+    host: holmes
+    namespace: holmesgpt
+    service: holmesgpt-holmes
+    port: 80
+    healthCheckPath: /healthz

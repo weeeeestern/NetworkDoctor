@@ -1,15 +1,8 @@
 # ---------------------------------------------------------------------------
-# VPC — private EKS and worker subnets, with the ALB and a single zonal NAT
-# gateway in public subnets. The lab accepts a shared egress dependency.
+# VPC — two AZs. Public subnets hold the Gateway ALB and a single zonal NAT
+# gateway; private subnets hold the EKS interfaces, workers and the Bedrock
+# endpoint. The lab accepts a shared egress dependency.
 # ---------------------------------------------------------------------------
-
-data "aws_availability_zones" "available" {
-  state = "available"
-}
-
-locals {
-  azs = slice(data.aws_availability_zones.available.names, 0, 3)
-}
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
@@ -18,17 +11,25 @@ module "vpc" {
   name = var.name
   cidr = var.vpc_cidr
 
-  azs = local.azs
-  # 10.80.0.0/20, 10.80.16.0/20, 10.80.32.0/20
-  private_subnets = [for i in range(length(local.azs)) : cidrsubnet(var.vpc_cidr, 4, i)]
-  # 10.80.48.0/24, 10.80.49.0/24, 10.80.50.0/24
-  public_subnets = [for i in range(length(local.azs)) : cidrsubnet(var.vpc_cidr, 8, i + 48)]
+  azs = var.availability_zones
+  # 10.80.0.0/20, 10.80.16.0/20
+  private_subnets = [for i in range(length(var.availability_zones)) : cidrsubnet(var.vpc_cidr, 4, i)]
+  # 10.80.48.0/24, 10.80.49.0/24
+  public_subnets = [for i in range(length(var.availability_zones)) : cidrsubnet(var.vpc_cidr, 8, i + 48)]
 
   create_igw              = true
   map_public_ip_on_launch = false
   enable_nat_gateway      = true
   single_nat_gateway      = true
   enable_dns_hostnames    = true
+
+  # Subnet discovery for the AWS Load Balancer Controller.
+  public_subnet_tags = {
+    "kubernetes.io/role/elb" = 1
+  }
+  private_subnet_tags = {
+    "kubernetes.io/role/internal-elb" = 1
+  }
 }
 
 # ---------------------------------------------------------------------------

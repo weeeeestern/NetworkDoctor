@@ -1,5 +1,15 @@
 locals {
   worker_addons = toset(["coredns", "kube-proxy", "eks-pod-identity-agent"])
+
+  # One fixed-size node group per AZ, keyed by the AZ letter ("a", "c").
+  # A replaced worker comes back in the same AZ, so EBS-backed pods pinned
+  # to that AZ can reschedule onto it.
+  node_groups = {
+    for i, az in var.availability_zones : substr(az, length(az) - 1, 1) => {
+      subnet_id = module.vpc.private_subnets[i]
+      size      = var.node_counts[i]
+    }
+  }
 }
 
 data "aws_eks_addon_version" "lab" {
@@ -29,12 +39,14 @@ module "workers" {
   source  = "terraform-aws-modules/eks/aws//modules/eks-managed-node-group"
   version = "20.37.2"
 
-  name                   = "${var.name}-workers"
+  for_each = local.node_groups
+
+  name                   = "${var.name}-${each.key}"
   cluster_name           = module.eks.cluster_name
   cluster_version        = module.eks.cluster_version
   cluster_service_cidr   = module.eks.cluster_service_cidr
   vpc_security_group_ids = [module.eks.node_security_group_id]
-  subnet_ids             = module.vpc.private_subnets
+  subnet_ids             = [each.value.subnet_id]
   instance_types         = var.node_instance_types
   ami_type               = "AL2023_x86_64_STANDARD"
   capacity_type          = "ON_DEMAND"
@@ -48,9 +60,9 @@ module "workers" {
   }
 
   # Equal min, desired and max keep incident demo capacity fixed.
-  min_size     = var.node_count
-  desired_size = var.node_count
-  max_size     = var.node_count
+  min_size     = each.value.size
+  desired_size = each.value.size
+  max_size     = each.value.size
 
   # Workers need the private default routes for internet access during startup.
   depends_on = [aws_eks_addon.vpc_cni, module.vpc]

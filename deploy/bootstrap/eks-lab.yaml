@@ -51,6 +51,10 @@ applications:
       prometheus:
         prometheusSpec:
           retention: 7d
+          # The EBS volume is zonal. Pin to the first Terraform AZ, whose
+          # node group has two workers, so a node loss reschedules in-zone.
+          nodeSelector:
+            topology.kubernetes.io/zone: ap-northeast-2a
           # EBS-backed storage; without it Prometheus data dies with the pod.
           storageSpec:
             volumeClaimTemplate:
@@ -75,6 +79,12 @@ applications:
     namespace: networkdoctor
     valueFiles:
       - values-eks-lab.yaml
+
+  # HTTPRoutes (nd./grafana. hosts) on the Terraform-managed Gateway. Its
+  # routes live in the networkdoctor and monitoring namespaces, so sync it
+  # after those two apps.
+  - name: gateway-routes
+    namespace: networkdoctor
 
   # Cat Shop (podinfo) demo workload + fortio load
   - name: networkdoctor-demo

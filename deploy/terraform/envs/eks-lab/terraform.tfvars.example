@@ -4,15 +4,16 @@ name            = "nd-eks-lab"
 region          = "ap-northeast-2"
 cluster_version = "1.35"
 
-# Fixed at three workers for incident demos (min = desired = max).
+# Two AZs; the first holds Prometheus and the backend (EBS), so it gets more workers.
+availability_zones  = ["ap-northeast-2a", "ap-northeast-2c"]
 node_instance_types = ["t3a.medium"]
-node_count          = 3
+node_counts         = [2, 1]
 
-# Replace the example with trusted public IPv4 /32s for kubectl and ALB HTTPS.
+# Zone and wildcard certificate from envs/dns (apply that stack first).
+domain = "netdoc.cloud"
+
+# Replace the example with trusted public IPv4 /32s for kubectl and the Gateway ALB.
 team_api_cidrs = ["203.0.113.25/32"]
-
-# Replace with an issued ACM certificate for the team subdomain in this region.
-team_alb_certificate_arn = "arn:aws:acm:ap-northeast-2:123456789012:certificate/00000000-0000-0000-0000-000000000000"
 
 # Optional IAM Identity Center role ARNs for trusted lab operators.
 team_role_arns = []

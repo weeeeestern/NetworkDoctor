@@ -1,30 +1,74 @@
 # NetworkDoctor — AWS EKS 시연 환경
 
-서울 리전에 5일짜리 팀 시연 환경을 만든다. Terraform은 VPC, EKS, NAT Gateway,
-ALB, Cilium, Argo CD를 구성한다. Argo CD는 모니터링, NetworkDoctor, Cat Shop을 배포한다.
+서울 리전에 5일짜리 팀 시연 환경을 만든다. Terraform 스택은 두 개다.
+
+- `envs/dns` — Route53 공개 영역(`netdoc.cloud`)과 와일드카드 ACM 인증서.
+  **한 번 만들고 유지한다.** 랩을 지워도 네임서버와 인증서가 바뀌지 않는다.
+- `envs/eks-lab` — VPC, EKS, NAT Gateway, Cilium, AWS Load Balancer Controller,
+  external-dns, Gateway, Bedrock VPC 엔드포인트, Argo CD. 시연 기간에만 띄운다.
+
+Argo CD는 모니터링, NetworkDoctor, HTTPRoute(`gateway-routes`), Cat Shop을 배포한다.
 시연 전에는 **워커 3대에서 수집기가 실행되고, 같은 알림이 백엔드에 기록되며
 팀 Slack에 도착하는지** 확인한다. HolmesGPT는 선택 사항이다.
 
-- **EKS 1.35 표준 지원, Cilium 1.19.10, AL2023 x86-64 워커.** 기본 용량은
-  온디맨드 `t3a.medium` 3대다. 최소·목표·최대는 모두 `node_count`로 고정한다.
-  노드 교체와 계획된 업데이트는 별도이므로 업데이트는 시연 시간 밖에서 진행한다.
+- **EKS 1.35 표준 지원, Cilium 1.19.10, AL2023 x86-64 워커.** 두 가용 영역에
+  노드 그룹을 하나씩 두고 온디맨드 `t3a.medium`을 `node_counts`(기본 2대·1대)로
+  고정한다. 노드 교체와 계획된 업데이트는 별도이므로 업데이트는 시연 시간 밖에서 진행한다.
 - **워커는 프라이빗 서브넷에 둔다.** 워커는 공인 IPv4 없이 내부 EKS API를
   사용하고, NAT Gateway 1개를 통해 Slack, 이미지 레지스트리, Git에 연결한다.
-  세 가용 영역이 NAT 하나를 공유하므로 해당 영역의 장애에 아웃바운드가 영향을 받는다.
-- **팀은 ALB에서 HTTPS로 조회한다.** ALB는 세 퍼블릭 서브넷에 배치되며, 팀이
-  등록한 공인 IPv4에서만 443 포트로 접근할 수 있다. ALB는 `GET`/`HEAD`를
-  백엔드로 전달한다. 변경 기능은 팀 운영자가 SSO로 접속한 뒤 로컬 포트 전달로
-  사용한다. 팀원이 다른 네트워크로 이동하면 허용 IP를 갱신한다.
+  두 가용 영역이 NAT 하나를 공유하므로 해당 영역의 장애에 아웃바운드가 영향을 받는다.
+- **팀은 Gateway API로 만든 ALB에서 HTTPS로 조회한다.** Terraform이 만든
+  Gateway를 AWS Load Balancer Controller가 두 퍼블릭 서브넷의 ALB로 만들고,
+  HTTPRoute마다 Pod IP를 대상으로 등록한다(NodePort 없음). external-dns가
+  `nd.<domain>`, `grafana.<domain>` 레코드를 Route53에 쓴다. 팀이 등록한 공인
+  IPv4에서만 443 포트로 접근할 수 있다. NetworkDoctor 라우트는 `GET`/`HEAD`만
+  전달하므로 변경 기능은 팀 운영자가 SSO로 접속한 뒤 로컬 포트 전달로 사용한다.
+  Grafana는 로그인과 조회에 `POST`를 쓰므로 모든 메서드를 전달한다.
+  팀원이 다른 네트워크로 이동하면 허용 IP를 갱신한다.
+- **Bedrock 호출은 VPC 안에서 끝난다.** `bedrock-runtime` 인터페이스 엔드포인트가
+  프라이빗 서브넷에 있고, `llm-gateway/llm-gateway` 서비스 계정이 Pod Identity로
+  Claude 모델 호출 권한을 받는다. LLM 게이트웨이 배포는 별도 단계다.
 - Cilium은 VPC CNI 위에서 네트워크 정책과 Hubble 메트릭을 제공한다. VPC CNI는
-  IRSA, EBS CSI는 Pod Identity로 각자의 IAM 역할을 사용한다. 일반 Pod의 EC2 메타데이터 접근에는
+  IRSA, EBS CSI·Load Balancer Controller·external-dns는 Pod Identity로 각자의
+  IAM 역할을 사용한다. 일반 Pod의 EC2 메타데이터 접근에는
   IMDSv2 홉 제한을 적용한다. 호스트 네트워크 수집기는 신뢰된 워크로드로 취급한다.
-  Prometheus와 백엔드 데이터는 가용 영역에 종속된 EBS에 저장되므로, 그 영역에
-  사용 가능한 워커가 없으면 복구가 지연될 수 있다.
+  Prometheus와 백엔드 데이터는 가용 영역에 종속된 EBS에 저장되므로 둘 다 워커가
+  2대인 첫 번째 가용 영역에 고정한다. 그 영역의 워커가 모두 없어지면 복구가 지연될 수 있다.
+
+## 0. DNS 스택 (한 번만)
+
+`netdoc.cloud`는 가비아에 등록되어 있고 지금은 가비아 네임서버를 쓴다. 이 단계는
+**도메인 전체의 DNS를 Route53으로 옮긴다.** 가비아 DNS에 따로 쓰는 레코드가 있으면
+먼저 Route53 영역에 옮겨 둔다. 일부만 위임하려면 `domain`을 `lab.netdoc.cloud`처럼
+서브도메인으로 두고, 가비아에 그 호스트의 NS 레코드 4개만 추가한다. 두 스택의
+`domain`과 `deploy/helm/gateway-routes/values.yaml`의 `domain`은 같아야 한다.
+
+네임서버 변경은 전파에 수 시간이 걸릴 수 있으므로 **시연 하루 전까지** 마친다.
+영역을 먼저 만들고, 네임서버를 바꾼 뒤 인증서 검증까지 적용한다.
+
+```sh
+cd deploy/terraform/envs/dns
+terraform init
+terraform apply -target=aws_route53_zone.this
+terraform output name_servers
+```
+
+출력된 네 개를 My가비아 → 도메인 관리 → 네임서버 설정에서 "타사 네임서버"로
+등록한다. `dig +short NS netdoc.cloud`에 Route53 네임서버가 보이면 나머지를 적용한다.
+ACM 검증은 위임이 보일 때까지 최대 3시간 기다린다.
+
+```sh
+dig +short NS netdoc.cloud
+terraform apply
+terraform output certificate_arn
+```
+
+이 스택은 랩을 지울 때 함께 지우지 않는다. 영역 요금은 월 $0.50이다.
 
 ## 1. 배포 전 확인과 플랫폼 생성
 
-먼저 시연 주소의 ACM 인증서를 서울 리전에서 발급받는다.
-[HTTPS 연결 CLI 절차](team-https-cli.md#1-aws-cli로-서울-리전-acm-인증서-발급)
+`envs/dns`의 인증서가 `ISSUED`인지 먼저 확인한다. 랩 스택은 `domain`으로
+영역과 인증서를 조회하므로, 없으면 계획 단계에서 멈춘다.
 
 AWS CLI SSO 프로필, Terraform 1.5 이상, EKS 1.35와 호환되는 kubectl
 1.34–1.36을 준비한다. 생성과 정리를 맡을 운영자 한 명을 정하고,
@@ -37,7 +81,14 @@ aws sts get-caller-identity --query '{Account:Account,Role:Arn}' --output table
 aws service-quotas get-service-quota --region ap-northeast-2 \
   --service-code ec2 --quota-code L-1216C47A \
   --query 'Quota.{Name:QuotaName,AppliedValue:Value}' --output table
+aws ec2 describe-instance-type-offerings --region ap-northeast-2 \
+  --location-type availability-zone --filters Name=instance-type,Values=t3a.medium \
+  --query 'InstanceTypeOfferings[].Location' --output text
+aws acm list-certificates --region ap-northeast-2 \
+  --query 'CertificateSummaryList[].{Domain:DomainName,Status:Status}' --output table
 ```
+
+`availability_zones`의 두 영역이 `t3a.medium` 제공 목록에 있어야 한다.
 
 서울 리전의 **Running On-Demand Standard instances**에 기존 사용분과 용량 예약을
 제외하고도 **6 vCPU**가 남아 있어야 한다. 콘솔의 Service Quotas에서 적용 한도와
@@ -48,16 +99,17 @@ aws service-quotas get-service-quota --region ap-northeast-2 \
 저장소 루트에서 시작한다. 기존 `terraform.tfvars`는 보존하고 직접 수정한다.
 
 - `team_api_cidrs`에 Terraform 실행 컴퓨터와 팀원이 사용하는 실제 공인 IPv4를
-  각각 `/32`로 넣는다. 이 목록은 EKS API와 ALB에 함께 적용된다. 팀이 관리하는
+  각각 `/32`로 넣는다. 이 목록은 EKS API와 Gateway ALB에 함께 적용된다. 팀이 관리하는
   접속망의 주소를 사용한다.
-- `team_alb_certificate_arn`에 서울 리전에서 발급 완료된 ACM 인증서 ARN을 넣는다.
-  인증서는 팀이 관리하는 시연 서브도메인(`demo.netdoc.cloud`)과 일치해야 한다.
-  시연 DNS 레코드는 앱 배포 후 기존 DNS 서비스에서 추가한다.
+- `domain`은 `envs/dns`와 같은 값으로 둔다.
+- `availability_zones`의 첫 영역을 바꾸면 `deploy/bootstrap/eks-lab.yaml`
+  (Prometheus)과 `deploy/helm/networkdoctor/values-eks-lab.yaml`(backend)의
+  `topology.kubernetes.io/zone` 값도 같이 바꾼다. `terraform output stateful_zone`이 기준이다.
 - 팀 운영자가 직접 접속해야 하면 `team_role_arns`에 IAM 콘솔의 전체 SSO 역할
   ARN(`arn:aws:iam::…:role/…/AWSReservedSSO_…`)을 넣는다.
 
-예전 입력의 `node_min`, `node_desired`, `node_max`, `domain`은 제거하고
-새 예시의 버전과 인스턴스 크기를 확인한다.
+예전 입력의 `node_count`와 `team_alb_certificate_arn`은 제거하고 `node_counts`,
+`availability_zones`, `domain`을 새 예시대로 넣는다.
 
 ```sh
 cd deploy/terraform/envs/eks-lab
@@ -75,9 +127,9 @@ terraform show lab.tfplan
 ```
 
 이 구성은 **신규 시연 클러스터** 기준이다. 계획에서 기존 환경의 교체·삭제가
-보이면 적용을 멈추고 상태와 계정을 확인한다. 이전 구성에서 만든 Gateway와 ALB는
-이전 컨트롤러가 살아 있을 때 별도로 정리한다. 기존 클러스터를 직접 업그레이드할
-때는 EKS 버전과 애드온의 전환 순서를 별도로 검토한다.
+보이면 적용을 멈추고 상태와 계정을 확인한다. 이전 구성(세 가용 영역, Terraform이
+직접 만든 ALB)으로 띄운 랩이 있으면 먼저 그 상태로 정리한 뒤 새로 만든다.
+기존 클러스터를 직접 업그레이드할 때는 EKS 버전과 애드온의 전환 순서를 별도로 검토한다.
 
 위 계획을 확인한 후 적용한다. 일부만 생성되고 실패했다면 같은 상태와 입력으로
 원인을 해결하고 다시 계획하거나 정리한다. 상태 파일은 Git에 올리지 않는다.
@@ -141,6 +193,8 @@ kubectl -n argocd patch application monitoring --type=merge -p "$sync_operation"
 kubectl -n argocd get application monitoring -w
 kubectl -n argocd patch application networkdoctor --type=merge -p "$sync_operation"
 kubectl -n argocd get application networkdoctor -w
+kubectl -n argocd patch application gateway-routes --type=merge -p "$sync_operation"
+kubectl -n argocd get application gateway-routes -w
 kubectl -n argocd patch application networkdoctor-demo --type=merge -p "$sync_operation"
 kubectl -n argocd get application networkdoctor-demo -w
 ```
@@ -166,11 +220,27 @@ HolmesGPT를 쓸 때만 `holmesgpt` 네임스페이스를 먼저 만든다. EKS�
 지정하고 `holmes-llm` Secret의 `LLM_GATEWAY_KEY`를 등록한다. Holmes 앱을
 동기화해 준비된 뒤, NetworkDoctor EKS 값의 `backend.config.holmesURL`을
 `http://holmesgpt-holmes.holmesgpt.svc:80`으로 바꾸고 다시 동기화한다.
+클러스터 안의 LLM 게이트웨이는 `llm-gateway` 네임스페이스의 `llm-gateway`
+서비스 계정으로 띄운다. Terraform이 그 계정에 Bedrock Pod Identity를 미리 연결해 둔다.
 
 ### 팀 HTTPS 접속
 
-NetworkDoctor를 동기화한 뒤 AWS CLI로 ALB 상태를 확인하고
-`demo.netdoc.cloud`를 연결한다. [HTTPS 연결 CLI 절차](team-https-cli.md#3-alb-상태-확인-후-시연-주소-연결)
+`gateway-routes`를 동기화하면 Load Balancer Controller가 ALB에 라우트를 붙이고
+external-dns가 Route53 레코드를 만든다. Gateway가 `Programmed`이고 라우트가
+`Accepted`인지 확인한 뒤 허용된 팀 IPv4에서 접속한다. `GET`은 성공하고, `POST`는
+라우트에 일치하지 않아 ALB 기본 응답(4xx)을 받는다(NetworkDoctor 라우트는 `GET`/`HEAD`만 일치).
+
+```sh
+kubectl -n gateway get gateway lab
+kubectl -n networkdoctor get httproute networkdoctor -o jsonpath='{.status.parents[0].conditions}'
+kubectl -n monitoring get httproute grafana
+dig +short nd.netdoc.cloud
+curl -4 -fsS --max-time 15 https://nd.netdoc.cloud/healthz
+curl -4 -sS --max-time 15 -o /dev/null -w '%{http_code}\n' -X POST https://nd.netdoc.cloud/healthz
+```
+
+DNS가 아직 없으면 `kubectl -n kube-system logs deploy/external-dns`에서 레코드 생성을
+확인한다. 대상이 `unhealthy`이면 EC2 콘솔의 대상 그룹에서 Pod IP와 헬스체크 경로를 본다.
 
 ### 팀 운영자 SSO·포트 전달
 
@@ -179,7 +249,7 @@ NetworkDoctor를 동기화한 뒤 AWS CLI로 ALB 상태를 확인하고
 `eks:DescribeCluster`가 필요하다. 배포 후 팀원 접속을 추가하는 경우 같은
 Terraform 상태에서 입력을 갱신하고 다시 계획·적용한다. Kubernetes 권한은
 `networkdoctor` 내 Pod 포트 전달을 허용한다. 백엔드 변경 기능과 호스트 네트워크
-수집기가 같은 범위에 있다. 조회만 하는 팀원은 ALB 주소를 사용한다.
+수집기가 같은 범위에 있다. 조회만 하는 팀원은 `https://nd.netdoc.cloud`를 사용한다.
 
 NetworkDoctor 네임스페이스가 생긴 뒤 운영자가 적용한다.
 
@@ -234,12 +304,13 @@ unset nd_slack_webhook
 
 ## 4. 5일 뒤 정리
 
-120시간 운영 시 기본 비용은 **약 $42**로 추정한다. 기존 약 $32 구성에서
-NAT Gateway 1개에 $7.08, ALB 1개에 $2.70, 공인 IPv4가 3개에서 4개로
-바뀌면서 $0.60이 추가된다. 네 개는 NAT용 1개와 ALB의 가용 영역별 기본 3개다.
-NAT 데이터 처리($0.059/GB), ALB 사용량($0.008/LCU-시간), 가용 영역 간 전송,
-로그, 초과 CPU 크레딧, AI 사용과 세금은 별도다. 운영 시작 전에 종료 시각과
-담당자를 정한다. 종료는 수동이다.
+120시간 운영 시 기본 비용은 **약 $45**로 추정한다. 기존 약 $32 구성에서
+NAT Gateway 1개에 $7.08, ALB 1개에 $2.70, Bedrock 인터페이스 엔드포인트
+2개(가용 영역별)에 약 $3.1이 추가된다. 공인 IPv4는 NAT용 1개와 ALB의 가용 영역별
+2개로 3개다. NAT 데이터 처리($0.059/GB), ALB 사용량($0.008/LCU-시간), 엔드포인트
+데이터 처리($0.01/GB), 가용 영역 간 전송, 로그, 초과 CPU 크레딧, Bedrock 토큰
+사용량과 세금은 별도다. `envs/dns`의 Route53 영역(월 $0.50)은 랩과 별개로 계속 과금된다.
+운영 시작 전에 종료 시각과 담당자를 정한다. 종료는 수동이다.
 [AWS EKS](https://aws.amazon.com/eks/pricing/) · [EC2](https://aws.amazon.com/ec2/pricing/on-demand/) ·
 [VPC](https://aws.amazon.com/vpc/pricing/) · [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) ·
 [EBS](https://aws.amazon.com/ebs/pricing/) · [KMS](https://aws.amazon.com/kms/pricing/)
@@ -259,7 +330,7 @@ NAT 데이터 처리($0.059/GB), ALB 사용량($0.008/LCU-시간), 가용 영역
 kubectl -n networkdoctor delete prometheusrule networkdoctor-eks-alert-smoke --ignore-not-found &&
 kubectl -n networkdoctor delete alertmanagerconfig networkdoctor-slack --ignore-not-found &&
 kubectl -n argocd delete application networkdoctor-root --ignore-not-found &&
-kubectl -n argocd delete application networkdoctor-demo networkdoctor holmesgpt --ignore-not-found --timeout=5m &&
+kubectl -n argocd delete application gateway-routes networkdoctor-demo networkdoctor holmesgpt --ignore-not-found --timeout=5m &&
 kubectl -n argocd delete application monitoring --ignore-not-found --timeout=5m
 ```
 
@@ -270,8 +341,11 @@ monitoring 설치 전에 중단한 랩은 등록되지 않은 리소스 유형�
    끝난 claim만 삭제한다. `Retain` 정책이나 정리 실패로 볼륨이 남을 수 있다.
    EC2의 볼륨 화면에서 기록한 각 ID를 확인한다. 여전히 남은 볼륨은 백업이
    끝났고 이 랩 전용이며 분리된 상태인지 확인한 뒤 그 ID만 삭제한다.
-5. 같은 상태에서 종료 계획을 만든다. 이 랩의 ALB, 대상 그룹, NAT Gateway와
-   NAT용 탄력적 IP(EIP)를 포함해 랩에서 만든 리소스만 지워지는지 확인한다.
+5. 같은 상태에서 종료 계획을 만든다. 이 랩의 Gateway, NAT Gateway와 NAT용
+   탄력적 IP(EIP), Bedrock 엔드포인트를 포함해 랩에서 만든 리소스만 지워지는지
+   확인한다. ALB와 대상 그룹은 Terraform 상태에 없다. Terraform이 Gateway를
+   먼저 지우고, Load Balancer Controller가 ALB를 지울 때까지 기다린 뒤 컨트롤러와
+   VPC를 지운다. `envs/dns`는 계획 대상이 아니다.
 
 ```sh
 terraform -chdir=deploy/terraform/envs/eks-lab plan -destroy -out=lab-destroy.tfplan
@@ -279,9 +353,10 @@ terraform -chdir=deploy/terraform/envs/eks-lab show lab-destroy.tfplan
 ```
 
 6. 종료 계획이 맞으면 적용한다. 서울 리전 콘솔에서 랩의 ALB, NAT Gateway, EIP,
-   EKS, EC2, EBS 삭제가 끝났는지 확인한다. 리소스가 삭제 중이면 완료될 때까지
-   확인한다. 기존 DNS 서비스에 추가한 시연용 CNAME도 제거한다. 보존하기로 한
-   스냅샷이나 로그에는 비용이 이어질 수 있다.
+   VPC 엔드포인트, EKS, EC2, EBS 삭제가 끝났는지 확인한다. 리소스가 삭제 중이면
+   완료될 때까지 확인한다. 3단계에서 `gateway-routes`를 지웠다면 external-dns가
+   `nd.`·`grafana.` 레코드를 이미 지웠다. Route53 영역에 남은 랩 레코드가 있으면
+   지운다(영역과 ACM 검증 레코드는 유지). 보존하기로 한 스냅샷이나 로그에는 비용이 이어질 수 있다.
 
 ```sh
 terraform -chdir=deploy/terraform/envs/eks-lab apply lab-destroy.tfplan
