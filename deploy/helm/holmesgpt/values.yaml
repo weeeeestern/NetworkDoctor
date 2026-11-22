@@ -1,15 +1,17 @@
 # HolmesGPT (official chart 0.38.1 as subchart `holmes`) for NetworkDoctor.
 #
 # Wiring:
-#   LLM      -> OpenAI-compatible gateway (LiteLLM on a VM); only a gateway
-#               virtual key reaches the cluster, via Secret `holmes-llm`.
+#   LLM      -> OpenAI-compatible LiteLLM gateway; only a gateway key reaches
+#               the cluster, via Secret `holmes-llm`. On-prem: a virtual key
+#               of the gateway VM. EKS: the in-cluster gateway's master key
+#               (it has no database, so no virtual keys), made by Terraform.
 #   Metrics  -> in-cluster Prometheus (kube-prometheus-stack).
 #   Skills   -> skills/<scenario>/SKILL.md from this Git repo, fetched by an
 #               init container at pod start (Helm cannot read files outside
 #               the chart directory, and skills/ is the single source).
 #
-# Environment-specific values (gateway URL, Prometheus URL, git ref) live in
-# values-onprem-lab.yaml.
+# Environment-specific values (gateway URL, model list, Prometheus URL) live in
+# values-onprem-lab.yaml and values-eks-lab.yaml.
 
 holmes:
   # Secret created out of band (never in Git):
@@ -32,10 +34,6 @@ holmes:
       api_base: http://llm-gateway.invalid:4000/v1
       api_key: envRef:LLM_GATEWAY_KEY
       temperature: 0
-    gateway-luna:
-      model: openai/gpt-luna
-      api_base: http://llm-gateway.invalid:4000/v1
-      api_key: envRef:LLM_GATEWAY_KEY
 
   additionalEnvVars:
     # Default model for /api/chat when the request does not name one.

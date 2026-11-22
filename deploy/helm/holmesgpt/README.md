@@ -6,14 +6,16 @@ Wrapper around the official `holmes` chart 0.38.1 (vendored in `charts/`).
 Holmes pod (ns holmesgpt)
   init: fetch-skills  git fetch SKILLS_REF, sparse skills/  -> emptyDir -> /etc/holmes/networkdoctor-skills
   env:  LLM_GATEWAY_KEY (Secret holmes-llm), MODEL=gateway-sonnet
-  LLM:  http://192.168.0.21:4000/v1   (LiteLLM gateway, deploy/llm-gateway/)
+  LLM:  on-prem http://192.168.0.21:4000/v1   (LiteLLM gateway VM, deploy/llm-gateway/)
+        EKS     http://llm-gateway.llm-gateway.svc:4000/v1   (deploy/helm/llm-gateway → Bedrock)
   metrics: prometheus-stack-kube-prom-prometheus.monitoring.svc:9090
   toolsets: kubernetes/core, kubernetes/logs, prometheus/metrics, skills, bash(extended)
 ```
 
 ## Before the first sync
 
-The gateway virtual key is not in Git. Create the Secret once:
+On the EKS lab Terraform creates the Secret (deploy/terraform/envs/eks-lab/llm.tf);
+skip this section there. On-prem the gateway virtual key is not in Git. Create the Secret once:
 
 ```bash
 kubectl create namespace holmesgpt
@@ -24,13 +26,15 @@ Without it the pod stays in `CreateContainerConfigError`.
 
 ## Models
 
-| Holmes model name | Gateway alias | Provider model |
-| --- | --- | --- |
-| `gateway-sonnet` (default) | `claude-sonnet` | Anthropic `claude-sonnet-5-5` |
-| `gateway-haiku` | `claude-haiku` | Anthropic `claude-haiku-4-5-20251001` |
-| `gateway-luna` | `gpt-luna` | OpenAI `gpt-5.6-luna` |
+| Holmes model name | Gateway alias | On-prem provider model | EKS (Bedrock) |
+| --- | --- | --- | --- |
+| `gateway-sonnet` (default) | `claude-sonnet` | Anthropic `claude-sonnet-5-5` | `global.anthropic.claude-sonnet-4-5-20250929-v1:0` |
+| `gateway-haiku` | `claude-haiku` | Anthropic `claude-haiku-4-5-20251001` | `global.anthropic.claude-haiku-4-5-20251001-v1:0` |
+| `gateway-luna` (on-prem only) | `gpt-luna` | OpenAI `gpt-5.6-luna` | — |
+| `gateway-sonnet-eval` (EKS only) | `claude-sonnet-eval` | — | same as `gateway-sonnet` |
 
-Pick one per request with `"model": "gateway-luna"` in the `/api/chat` body,
+The model list is per environment (`values-onprem-lab.yaml`, `values-eks-lab.yaml`).
+Pick one per request with `"model": "gateway-sonnet"` in the `/api/chat` body,
 or change the `MODEL` env var for the default.
 
 ## Try it
