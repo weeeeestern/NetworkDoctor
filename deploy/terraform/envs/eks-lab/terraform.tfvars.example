@@ -1,0 +1,20 @@
+# cp terraform.tfvars.example terraform.tfvars  (terraform.tfvars is gitignored)
+
+name            = "nd-eks-lab"
+region          = "ap-northeast-2"
+cluster_version = "1.35"
+
+# Two AZs; the first holds Prometheus and the backend (EBS), so it gets more workers.
+availability_zones  = ["ap-northeast-2a", "ap-northeast-2c"]
+node_instance_types = ["t3a.medium"]
+node_counts         = [2, 1]
+
+# Zone and wildcard certificate from envs/dns (apply that stack first).
+domain = "netdoc.cloud"
+
+# GitHub Actions runs without this file, so anything set only here is undone by
+# the next CI apply. Keep the committed defaults; for admin_role_arns and
+# team_role_arns use the TF_ADMIN_ROLE_ARNS / TF_TEAM_ROLE_ARNS repository
+# variables and export the same values locally, e.g.
+#   export TF_VAR_admin_role_arns='["arn:aws:iam::123456789012:user/operator"]'
+

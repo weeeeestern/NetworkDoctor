@@ -1,0 +1,108 @@
+# EKS lab environment: which child Applications the root app creates.
+# Rendered by deploy/argocd/root-application-eks-lab.yaml. Unlike the on-prem
+# lab, the monitoring stack is also an Argo application here — Terraform
+# (deploy/terraform) stops at the platform layer (VPC/EKS/Cilium/Argo CD itself).
+#
+# Adding a chart under deploy/helm/ is not enough to deploy it; it must also
+# be listed here. The root app passes its resolved Git commit to local child
+# charts; upstream Helm charts keep their explicit chart versions below.
+
+env: eks-lab
+project: default
+
+spec:
+  destination:
+    # In-cluster Argo CD deploys to its own cluster.
+    server: https://kubernetes.default.svc
+
+source:
+  repoURL: https://github.com/weeeeestern/NetworkDoctor.git
+  targetRevision: main
+
+# Empty on purpose: no `automated:` block, so every child Application is
+# manual-sync, same as on-prem. Sync `monitoring` FIRST — it installs the
+# Prometheus Operator CRDs the networkdoctor chart's ServiceMonitor/
+# PrometheusRule/AlertmanagerConfig objects need.
+syncPolicy: {}
+
+applications:
+  # Prometheus Operator + Prometheus + Alertmanager + Grafana from the
+  # upstream Helm repository. The release name MUST stay "monitoring":
+  # the `release: monitoring` selectors and the
+  # monitoring-kube-prometheus-prometheus / monitoring-grafana service names
+  # in deploy/helm/networkdoctor/values-eks-lab.yaml depend on it.
+  # (No local-path-provisioner on EKS; the EBS CSI addon provides gp2.)
+  - name: monitoring
+    namespace: monitoring
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 92.17.1
+    values:
+      alertmanager:
+        alertmanagerSpec:
+          # Select both the backend route and the optional Slack route. Their
+          # namespace must match the namespace stamped on NetworkDoctor alerts.
+          alertmanagerConfigSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: networkdoctor
+          alertmanagerConfigNamespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: networkdoctor
+      prometheus:
+        prometheusSpec:
+          retention: 7d
+          # The EBS volume is zonal. Pin to the first AZ's node group (two
+          # workers, label set in Terraform workers.tf), so a node loss
+          # reschedules in-zone.
+          nodeSelector:
+            networkdoctor.io/stateful: "true"
+          # EBS-backed storage; without it Prometheus data dies with the pod.
+          storageSpec:
+            volumeClaimTemplate:
+              spec:
+                storageClassName: gp2
+                accessModes: [ReadWriteOnce]
+                resources:
+                  requests:
+                    storage: 20Gi
+      grafana:
+        # Public at grafana.<domain>; the login comes from the Secret
+        # Terraform creates (deploy/terraform/envs/eks-lab/grafana.tf).
+        admin:
+          existingSecret: grafana-admin
+          userKey: admin-user
+          passwordKey: admin-password
+        sidecar:
+          dashboards:
+            # searchNamespace already defaults to ALL upstream, so the
+            # NetworkDoctor ConfigMaps in the app namespace are found as-is.
+            # Honor the chart's grafana_folder annotation -> "NetworkDoctor".
+            folderAnnotation: grafana_folder
+            provider:
+              foldersFromFilesStructure: true
+
+  # eBPF agent DaemonSet + backend + Prometheus/Alertmanager wiring
+  - name: networkdoctor
+    namespace: networkdoctor
+    valueFiles:
+      - values-eks-lab.yaml
+
+  # HTTPRoutes (nd./grafana. hosts) on the Terraform-managed Gateway. Its
+  # routes live in the networkdoctor and monitoring namespaces, so sync it
+  # after those two apps.
+  - name: gateway-routes
+    namespace: networkdoctor
+
+  # Cat Shop (podinfo) demo workload + fortio load
+  - name: networkdoctor-demo
+    namespace: networkdoctor-demo
+    valueFiles:
+      - values-eks-lab.yaml
+
+  # Optional HolmesGPT RCA agent: leave unsynced until an EKS-reachable LLM
+  # gateway and Secret holmes-llm (LLM_GATEWAY_KEY) are configured. The EKS
+  # values below fill only the known Prometheus address; sync Holmes last.
+  - name: holmesgpt
+    namespace: holmesgpt
+    valueFiles:
+      - values-eks-lab.yaml

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: gateway-routes
+description: HTTPRoutes and IP-target TargetGroupConfigurations that attach EKS lab Services to the Terraform-managed Gateway (deploy/terraform/envs/eks-lab/gateway.tf).
+type: application
+version: 0.1.0

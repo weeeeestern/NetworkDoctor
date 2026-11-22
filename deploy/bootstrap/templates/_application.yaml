@@ -4,6 +4,8 @@ Render one Argo CD Application per entry of .Values.applications.
 Per-app fields (only `name` is required):
   name         Application name; also the default chart directory and namespace.
   path         chart path in the repo   (default: deploy/helm/<name>)
+  chart        Helm-repository chart name; set repoURL to the Helm repo URL and
+               targetRevision to the chart version (renders `chart:` not `path:`)
   namespace    destination namespace    (default: <name>)
   releaseName  Helm release name        (default: <name>)
   valueFiles   list of values files     (default: none -> chart values.yaml only)
@@ -34,7 +36,11 @@ spec:
   source:
     repoURL: {{ $application.repoURL | default $root.Values.source.repoURL }}
     targetRevision: {{ $application.targetRevision | default ($root.Values.source.targetRevision | default "main") }}
+    {{- if $application.chart }}
+    chart: {{ $application.chart }}
+    {{- else }}
     path: {{ $application.path | default (printf "deploy/helm/%s" $application.name) }}
+    {{- end }}
     helm:
       releaseName: {{ $application.releaseName | default $application.name }}
       {{- with $application.valueFiles }}

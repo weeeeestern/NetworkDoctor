@@ -1,0 +1,29 @@
+# Render the run ID and deadline using eks-alert-smoke.md. The example is inert.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: networkdoctor-eks-alert-smoke
+  namespace: networkdoctor
+  labels:
+    release: monitoring
+spec:
+  groups:
+    - name: networkdoctor.eks-alert-smoke
+      interval: 15s
+      rules:
+        - alert: NetworkDoctorEKSLabAlertSmoke
+          expr: vector(1) and (vector(time()) < 0)
+          labels:
+            namespace: networkdoctor
+            source: networkdoctor
+            # kube-prometheus-stack can inhibit severity=info in this namespace.
+            severity: warning
+            rule_id: smoke-eks-alert-delivery
+            scenario: smoke-eks-alert-delivery
+            smoke_run: "__SMOKE_RUN__"
+            # Alertmanager groups by service on both routes. Use a distinct
+            # synthetic service label for each run.
+            service: "eks-alert-smoke-__SMOKE_RUN__"
+          annotations:
+            summary: "[TEST] EKS alert delivery __SMOKE_RUN__"
+            description: "Synthetic notification rehearsal. No operator action required."

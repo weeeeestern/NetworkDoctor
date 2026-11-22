@@ -1,0 +1,69 @@
+# EKS lab overrides. Pairs with the kube-prometheus-stack that the Argo CD
+# bootstrap (deploy/bootstrap/eks-lab.yaml, app "monitoring") installs as
+# release "monitoring" in the monitoring namespace. The networkdoctor Argo
+# Application in that same bootstrap deploys this chart with this file.
+
+global:
+  # Match the Terraform name variable when deploying under a custom name.
+  clusterName: nd-eks-lab
+
+# Browser origins for the links in Slack and reports: the Gateway hosts from
+# deploy/helm/gateway-routes (<host>.<domain>).
+grafana:
+  url: https://grafana.netdoc.cloud
+ui:
+  url: https://nd.netdoc.cloud
+
+agent:
+  # The t3a.medium AL2023 primary ENA uses the systemd slot name ens5.
+  # Verify the host's default-route interface on each worker and override
+  # agent.iface if the AMI or instance type changes the interface name.
+  iface: ens5
+  image:
+    # Published linux/amd64 image, main-c3d5a60.
+    digest: sha256:0c44c036b401188645bd841721a7c84f3d338ba8cc80222d712a69cbcb506229
+
+serviceMonitor:
+  enabled: true
+  # kube-prometheus-stack's Prometheus selects monitors/rules by this label.
+  labels:
+    release: monitoring
+
+# Cilium PodMonitor (agent :9962 + Hubble :9965) inherits
+# serviceMonitor.labels; cilium.enabled already defaults to true.
+
+prometheusRule:
+  enabled: true
+  labels:
+    release: monitoring
+
+grafanaDashboards:
+  # The sidecar's upstream default searchNamespace=ALL finds the ConfigMaps
+  # here, and the stack enables the grafana_folder annotation, so dashboards
+  # land in the NetworkDoctor folder.
+  enabled: true
+
+alertmanagerConfig:
+  # The monitoring app selects this backend route and the optional Slack route.
+  enabled: true
+
+backend:
+  # The Gateway ALB reaches the pod IP directly (deploy/helm/gateway-routes),
+  # so the Service keeps the chart default ClusterIP.
+  # Same node group as Prometheus: the EBS volume below is zonal.
+  nodeSelector:
+    networkdoctor.io/stateful: "true"
+  image:
+    # Published linux/amd64 image, main-38da188.
+    digest: sha256:55d0788afb12641c07a7385dc6346f3dbd56daae9ee3854ab6cc4f9a5b17d7b1
+  config:
+    prometheusURL: http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090
+    # holmesURL: fill in once HolmesGPT is deployed on EKS
+    #   (deploy/helm/holmesgpt), use http://holmesgpt-holmes.holmesgpt.svc:80
+  persistence:
+    # EBS via the aws-ebs-csi-driver addon (Terraform), same gp2 class the
+    # bootstrap gives Prometheus. EKS 1.30+ no longer marks gp2 as the default
+    # class, so name it; an empty storageClass would leave the PVC Pending.
+    enabled: true
+    storageClass: gp2
+    size: 1Gi

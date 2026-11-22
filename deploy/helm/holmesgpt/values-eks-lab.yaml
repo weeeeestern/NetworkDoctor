@@ -1,0 +1,9 @@
+# Optional EKS Holmes setup. Configure an EKS-reachable LLM gateway and create
+# Secret holmes-llm in namespace holmesgpt before manually syncing this app.
+# The base modelList deliberately keeps its invalid gateway placeholder until
+# real gateway URLs are provided through deployment values; keys stay in Secret.
+holmes:
+  toolsets:
+    prometheus/metrics:
+      config:
+        prometheus_url: http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090

@@ -60,7 +60,11 @@ spec:
       {{- end }}
       containers:
         - name: backend
+          {{- if .Values.backend.image.digest }}
+          image: "{{ .Values.backend.image.repository }}@{{ .Values.backend.image.digest }}"
+          {{- else }}
           image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag | default .Chart.AppVersion }}"
+          {{- end }}
           imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
           env:
             - name: ND_LISTEN
