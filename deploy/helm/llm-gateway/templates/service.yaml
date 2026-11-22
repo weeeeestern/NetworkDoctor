@@ -1,0 +1,17 @@
+# http://llm-gateway.llm-gateway.svc:4000/v1 — the api_base Holmes uses.
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-gateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "llm-gateway.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "llm-gateway.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.port }}
+      targetPort: http
+      protocol: TCP

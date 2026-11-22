@@ -1,0 +1,47 @@
+# Same LiteLLM release as the on-prem gateway VM (deploy/llm-gateway).
+image:
+  repository: ghcr.io/berriai/litellm
+  tag: v1.103.0
+  pullPolicy: IfNotPresent
+
+# Must match the Pod Identity association in
+# deploy/terraform/envs/eks-lab/bedrock.tf (namespace llm-gateway).
+serviceAccount:
+  name: llm-gateway
+
+# Secret with LITELLM_MASTER_KEY (deploy/terraform/envs/eks-lab/llm.tf).
+masterKeySecret: llm-gateway
+
+aws:
+  region: ap-northeast-2
+
+# Client-facing aliases → Bedrock models. Holmes asks for these names through
+# its gateway-* modelList entries (deploy/helm/holmesgpt/values-eks-lab.yaml).
+# global.* are cross-region inference profiles; enable model access in the
+# Bedrock console first and check the IDs with
+#   aws bedrock list-inference-profiles --region ap-northeast-2
+# The -eval alias is the same model under its own name. Without a database
+# the gateway keeps no spend records, so this separates requests by name
+# only; it does not split the bill.
+models:
+  - name: claude-sonnet
+    bedrockModel: global.anthropic.claude-sonnet-4-5-20250929-v1:0
+  - name: claude-sonnet-eval
+    bedrockModel: global.anthropic.claude-sonnet-4-5-20250929-v1:0
+  - name: claude-haiku
+    bedrockModel: global.anthropic.claude-haiku-4-5-20251001-v1:0
+
+# When a model still fails after num_retries (throttling, outage), answer with
+# the listed models instead, so a demo RCA degrades rather than fails.
+# Not for claude-sonnet-eval: evaluation runs must stay on one model.
+fallbacks:
+  claude-sonnet: [claude-haiku]
+
+port: 4000
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    memory: 1Gi

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: llm-gateway
+description: In-cluster LiteLLM proxy for HolmesGPT on the EKS lab. No database; Bedrock through Pod Identity and the bedrock-runtime VPC endpoint, so no provider key and no internet path.
+type: application
+version: 0.1.0
+appVersion: "v1.103.0"
