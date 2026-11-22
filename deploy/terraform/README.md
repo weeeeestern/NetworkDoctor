@@ -46,7 +46,9 @@ GitHub Actions가 OIDC로 맡는 IAM 역할 두 개를 만든다. AWS 키를 저
 
 - `networkdoctor-github-actions-plan` — 읽기 전용(`ReadOnlyAccess`, 클러스터 조회).
   저장소 브랜치의 PR과 모든 브랜치의 수동 plan이 쓴다. PR이 워크플로를 고쳐도
-  이 역할 이상은 얻지 못한다.
+  이 역할 이상은 얻지 못한다. 다만 읽기 권한에는 Terraform 상태(Grafana 관리자
+  비밀번호 포함)와 클러스터 Secret(Slack Webhook 등) 조회가 포함된다. 저장소 쓰기
+  권한이 있는 팀원은 이 값을 볼 수 있다고 보고 운영한다.
 - `networkdoctor-github-actions` — apply·destroy용(`PowerUserAccess`와 `nd-eks-lab-*`
   이름의 IAM 리소스 관리, 클러스터 관리자). **`main` 브랜치에서 실행된 워크플로만**
   맡을 수 있으므로 리뷰를 거쳐 머지된 코드만 적용된다. 저장소 관리자가 `main`에
