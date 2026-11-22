@@ -101,7 +101,9 @@ terraform -chdir=deploy/terraform/envs/dns init -backend-config="bucket=$state_b
 
 GitHub에서는 Actions → terraform → Run workflow에서 브랜치 `main`, `stack=dns`, `action=apply`,
 `target=aws_route53_zone.this`로 첫 적용을, 위임 확인 후 `target` 없이 두 번째 적용을
-실행한다. 로컬에서는 다음과 같다.
+실행한다. `target` 입력은 `terraform -target`으로 넘어가 그 리소스(영역)만 적용한다.
+네임서버 4개는 영역을 만들어야 알 수 있고, 인증서 검증은 가비아가 그 네임서버를 가리켜야
+끝나므로 두 번에 나눈다. 다른 실행에서는 `target`을 비운다. 로컬에서는 다음과 같다.
 
 ```sh
 cd deploy/terraform/envs/dns
