@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------
-# VPC — private subnets for the EKS control plane interfaces, public subnets
-# for workers. Pods reach the internet through the worker's public IPv4.
+# VPC — private EKS and worker subnets, with the ALB and a single zonal NAT
+# gateway in public subnets. The lab accepts a shared egress dependency.
 # ---------------------------------------------------------------------------
 
 data "aws_availability_zones" "available" {
@@ -25,8 +25,9 @@ module "vpc" {
   public_subnets = [for i in range(length(local.azs)) : cidrsubnet(var.vpc_cidr, 8, i + 48)]
 
   create_igw              = true
-  map_public_ip_on_launch = true
-  enable_nat_gateway      = false
+  map_public_ip_on_launch = false
+  enable_nat_gateway      = true
+  single_nat_gateway      = true
   enable_dns_hostnames    = true
 }
 

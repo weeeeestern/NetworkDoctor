@@ -1,19 +1,20 @@
 # NetworkDoctor — AWS EKS 시연 환경
 
-서울 리전에 5일짜리 팀 시연 환경을 만든다. Terraform은 VPC, EKS, Cilium,
-Argo CD를 설치한다. Argo CD는 모니터링, NetworkDoctor, Cat Shop을 배포한다.
+서울 리전에 5일짜리 팀 시연 환경을 만든다. Terraform은 VPC, EKS, NAT Gateway,
+ALB, Cilium, Argo CD를 구성한다. Argo CD는 모니터링, NetworkDoctor, Cat Shop을 배포한다.
 시연 전에는 **워커 3대에서 수집기가 실행되고, 같은 알림이 백엔드에 기록되며
 팀 Slack에 도착하는지** 확인한다. HolmesGPT는 선택 사항이다.
 
 - **EKS 1.35 표준 지원, Cilium 1.19.10, AL2023 x86-64 워커.** 기본 용량은
   온디맨드 `t3a.medium` 3대다. 최소·목표·최대는 모두 `node_count`로 고정한다.
   노드 교체와 계획된 업데이트는 별도이므로 업데이트는 시연 시간 밖에서 진행한다.
-- **NAT Gateway·ALB·Route53·ACM 없이 운영한다.** 워커는 공인 IPv4와 Internet
-  Gateway로 Slack, 이미지 레지스트리, Git에 연결한다. 워커의 SSH나 앱 포트에는
-  인터넷 인바운드 규칙을 추가하지 않는다. 워커는 내부 EKS API 주소를 사용한다.
-- **팀 운영자는 SSO와 로컬 포트 전달로 접속한다.** 공개 웹 주소 대신
-  허용된 IP에서 EKS API에 접근한다. 팀원이 다른 네트워크로 이동하면 허용 IP를
-  갱신해야 한다.
+- **워커는 프라이빗 서브넷에 둔다.** 워커는 공인 IPv4 없이 내부 EKS API를
+  사용하고, NAT Gateway 1개를 통해 Slack, 이미지 레지스트리, Git에 연결한다.
+  세 가용 영역이 NAT 하나를 공유하므로 해당 영역의 장애에 아웃바운드가 영향을 받는다.
+- **팀은 ALB에서 HTTPS로 조회한다.** ALB는 세 퍼블릭 서브넷에 배치되며, 팀이
+  등록한 공인 IPv4에서만 443 포트로 접근할 수 있다. ALB는 `GET`/`HEAD`를
+  백엔드로 전달한다. 변경 기능은 팀 운영자가 SSO로 접속한 뒤 로컬 포트 전달로
+  사용한다. 팀원이 다른 네트워크로 이동하면 허용 IP를 갱신한다.
 - Cilium은 VPC CNI 위에서 네트워크 정책과 Hubble 메트릭을 제공한다. VPC CNI는
   IRSA, EBS CSI는 Pod Identity로 각자의 IAM 역할을 사용한다. 일반 Pod의 EC2 메타데이터 접근에는
   IMDSv2 홉 제한을 적용한다. 호스트 네트워크 수집기는 신뢰된 워크로드로 취급한다.
@@ -42,10 +43,17 @@ aws service-quotas get-service-quota --region ap-northeast-2 \
 [AWS 온디맨드 할당량](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-on-demand-instances.html#ec2-on-demand-instances-quotas)
 
 저장소 루트에서 시작한다. 기존 `terraform.tfvars`는 보존하고 직접 수정한다.
-`team_api_cidrs`를 Terraform 실행 컴퓨터와 팀 운영자가 쓸 실제 공인 IPv4
-`/32` 목록으로 바꾼다. 팀 운영자가 직접 접속해야 하면 적용 전에
-`team_role_arns`에도 IAM 콘솔의 전체 SSO 역할 ARN(`arn:aws:iam::…:role/…/AWSReservedSSO_…`)을
-넣는다. 예전 입력의 `node_min`, `node_desired`, `node_max`, `domain`은 제거하고
+
+- `team_api_cidrs`에 Terraform 실행 컴퓨터와 팀원이 사용하는 실제 공인 IPv4를
+  각각 `/32`로 넣는다. 이 목록은 EKS API와 ALB에 함께 적용된다. 팀이 관리하는
+  접속망의 주소를 사용한다.
+- `team_alb_certificate_arn`에 서울 리전에서 발급 완료된 ACM 인증서 ARN을 넣는다.
+  인증서는 팀이 관리하는 시연 서브도메인(예: `demo.example.com`)과 일치해야 한다.
+  시연 DNS 레코드는 앱 배포 후 기존 DNS 서비스에서 추가한다.
+- 팀 운영자가 직접 접속해야 하면 `team_role_arns`에 IAM 콘솔의 전체 SSO 역할
+  ARN(`arn:aws:iam::…:role/…/AWSReservedSSO_…`)을 넣는다.
+
+예전 입력의 `node_min`, `node_desired`, `node_max`, `domain`은 제거하고
 새 예시의 버전과 인스턴스 크기를 확인한다.
 
 ```sh
@@ -153,14 +161,35 @@ HolmesGPT를 쓸 때만 `holmesgpt` 네임스페이스를 먼저 만든다. EKS�
 동기화해 준비된 뒤, NetworkDoctor EKS 값의 `backend.config.holmesURL`을
 `http://holmesgpt-holmes.holmesgpt.svc:80`으로 바꾸고 다시 동기화한다.
 
-### 팀 운영자 접속
+### 팀 HTTPS 접속
+
+NetworkDoctor가 동기화되면 EKS Helm 설정이 ALB가 연결할 백엔드 NodePort를
+준비한다. AWS 콘솔의 대상 그룹에서 `healthy` 상태를 확인한다. 저장소 루트에서
+아래 명령으로 ALB의 DNS 이름을 확인한다.
+
+```sh
+terraform -chdir=deploy/terraform/envs/eks-lab output -raw team_alb_dns_name
+```
+
+팀이 사용하는 기존 DNS 서비스에서 인증서에 포함된 시연 서브도메인의 CNAME을
+위 ALB 주소로 연결한다. 도메인의 네임서버 위임은 기존대로 유지한다. 허용된
+IP에서 `https://`로 그 서브도메인을 열고, `/healthz`의 정상 응답과 웹 화면을
+확인한다. 아래의 `POST` 확인은 `403`이 예상된다.
+
+```sh
+demo_hostname='demo.example.com'  # 실제 인증서에 포함된 시연 서브도메인
+curl -fsS "https://$demo_hostname/healthz"
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST "https://$demo_hostname/healthz"
+```
+
+### 팀 운영자 SSO·포트 전달
 
 `team_role_arns`에는 신뢰된 팀 운영자의 SSO IAM 역할 ARN만 넣는다.
 클러스터 생성 관리자 역할은 이 목록에서 제외한다. 별도 SSO 역할에
 `eks:DescribeCluster`가 필요하다. 배포 후 팀원 접속을 추가하는 경우 같은
 Terraform 상태에서 입력을 갱신하고 다시 계획·적용한다. Kubernetes 권한은
 `networkdoctor` 내 Pod 포트 전달을 허용한다. 백엔드 변경 기능과 호스트 네트워크
-수집기가 같은 범위에 있다. 조회만 하는 사람에게는 화면을 공유한다.
+수집기가 같은 범위에 있다. 조회만 하는 팀원은 ALB 주소를 사용한다.
 
 NetworkDoctor 네임스페이스가 생긴 뒤 운영자가 적용한다.
 
@@ -215,12 +244,15 @@ unset nd_slack_webhook
 
 ## 4. 5일 뒤 정리
 
-120시간 운영 시 기본 비용은 **약 $32**로 추정한다. 표준 지원 EKS, Linux 온디맨드
-워커 3대, 공인 IPv4 3개, EBS와 KMS의 5일 사용분 기준이다. 트래픽, 로그,
-초과 CPU 크레딧, AI 사용과 세금은 별도다. 운영 시작 전에 종료 시각과 담당자를
-정한다. 종료는 수동이다.
+120시간 운영 시 기본 비용은 **약 $42**로 추정한다. 기존 약 $32 구성에서
+NAT Gateway 1개에 $7.08, ALB 1개에 $2.70, 공인 IPv4가 3개에서 4개로
+바뀌면서 $0.60이 추가된다. 네 개는 NAT용 1개와 ALB의 가용 영역별 기본 3개다.
+NAT 데이터 처리($0.059/GB), ALB 사용량($0.008/LCU-시간), 가용 영역 간 전송,
+로그, 초과 CPU 크레딧, AI 사용과 세금은 별도다. 운영 시작 전에 종료 시각과
+담당자를 정한다. 종료는 수동이다.
 [AWS EKS](https://aws.amazon.com/eks/pricing/) · [EC2](https://aws.amazon.com/ec2/pricing/on-demand/) ·
-[VPC](https://aws.amazon.com/vpc/pricing/) · [EBS](https://aws.amazon.com/ebs/pricing/) · [KMS](https://aws.amazon.com/kms/pricing/)
+[VPC](https://aws.amazon.com/vpc/pricing/) · [Elastic Load Balancing](https://aws.amazon.com/elasticloadbalancing/pricing/) ·
+[EBS](https://aws.amazon.com/ebs/pricing/) · [KMS](https://aws.amazon.com/kms/pricing/)
 
 1. 배포 때와 같은 AWS 계정·리전·Terraform 상태인지 확인한다.
    백엔드에서 보관할 보고서를 내려받는다. 백엔드 DB나 Prometheus 기록도
@@ -248,16 +280,18 @@ monitoring 설치 전에 중단한 랩은 등록되지 않은 리소스 유형�
    끝난 claim만 삭제한다. `Retain` 정책이나 정리 실패로 볼륨이 남을 수 있다.
    EC2의 볼륨 화면에서 기록한 각 ID를 확인한다. 여전히 남은 볼륨은 백업이
    끝났고 이 랩 전용이며 분리된 상태인지 확인한 뒤 그 ID만 삭제한다.
-5. 같은 상태에서 종료 계획을 만든다. 이 랩의 리소스만 지워지는지 확인한다.
+5. 같은 상태에서 종료 계획을 만든다. 이 랩의 ALB, 대상 그룹, NAT Gateway와
+   NAT용 탄력적 IP(EIP)를 포함해 랩에서 만든 리소스만 지워지는지 확인한다.
 
 ```sh
 terraform -chdir=deploy/terraform/envs/eks-lab plan -destroy -out=lab-destroy.tfplan
 terraform -chdir=deploy/terraform/envs/eks-lab show lab-destroy.tfplan
 ```
 
-6. 종료 계획이 맞으면 적용한다. 서울 리전에 랩의 EKS, EC2, EBS, 공인 IP가
-   남아 있는지 마지막으로 확인한다. 보존하기로 한 스냅샷이나 로그에는 비용이
-   이어질 수 있다. 콘솔에서 별도로 만든 리소스도 따로 확인한다.
+6. 종료 계획이 맞으면 적용한다. 서울 리전 콘솔에서 랩의 ALB, NAT Gateway, EIP,
+   EKS, EC2, EBS 삭제가 끝났는지 확인한다. 리소스가 삭제 중이면 완료될 때까지
+   확인한다. 기존 DNS 서비스에 추가한 시연용 CNAME도 제거한다. 보존하기로 한
+   스냅샷이나 로그에는 비용이 이어질 수 있다.
 
 ```sh
 terraform -chdir=deploy/terraform/envs/eks-lab apply lab-destroy.tfplan

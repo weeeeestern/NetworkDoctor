@@ -11,7 +11,8 @@ data "aws_eks_addon_version" "lab" {
 }
 
 # Install the CNI with its own role before workers need Pod networking. IRSA
-# lets the CNI start independently of the Pod Identity Agent. Keep default SNAT.
+# lets the CNI start independently of the Pod Identity Agent. Keep default SNAT
+# so packets can leave through the NAT gateway.
 resource "aws_eks_addon" "vpc_cni" {
   cluster_name             = module.eks.cluster_name
   addon_name               = "vpc-cni"
@@ -33,7 +34,7 @@ module "workers" {
   cluster_version        = module.eks.cluster_version
   cluster_service_cidr   = module.eks.cluster_service_cidr
   vpc_security_group_ids = [module.eks.node_security_group_id]
-  subnet_ids             = module.vpc.public_subnets
+  subnet_ids             = module.vpc.private_subnets
   instance_types         = var.node_instance_types
   ami_type               = "AL2023_x86_64_STANDARD"
   capacity_type          = "ON_DEMAND"
@@ -51,7 +52,8 @@ module "workers" {
   desired_size = var.node_count
   max_size     = var.node_count
 
-  depends_on = [aws_eks_addon.vpc_cni]
+  # Workers need the private default routes for internet access during startup.
+  depends_on = [aws_eks_addon.vpc_cni, module.vpc]
 }
 
 resource "aws_eks_addon" "workers" {

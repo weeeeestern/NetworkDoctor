@@ -32,14 +32,25 @@ variable "node_count" {
 }
 
 variable "team_api_cidrs" {
-  description = "Public IPv4 CIDRs for team members and the machine running Terraform (use /32 for a single IP)."
+  description = "Individual team and Terraform public IPv4 addresses in /32 form, for the API and team HTTPS listener."
   type        = list(string)
 
   validation {
     condition = length(var.team_api_cidrs) > 0 && alltrue([
-      for cidr in var.team_api_cidrs : try(cidrnetmask(cidr) != "0.0.0.0", false)
+      for cidr in var.team_api_cidrs : try(cidrnetmask(cidr) == "255.255.255.255", false)
     ])
-    error_message = "Enter at least one IPv4 CIDR for the team. A /0 range would expose the API to the entire internet."
+    error_message = "Enter individual team public IPv4 addresses as /32 CIDRs."
+  }
+}
+
+variable "team_alb_certificate_arn" {
+  description = "Issued ACM certificate for the team's subdomain in the same AWS region as the ALB."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = can(regex("^arn:aws:acm:[a-z0-9-]+:[0-9]{12}:certificate/[0-9a-f-]+$", var.team_alb_certificate_arn))
+    error_message = "Enter the ARN of a valid ACM certificate for the team subdomain."
   }
 }
 

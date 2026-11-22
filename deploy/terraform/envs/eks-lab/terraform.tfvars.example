@@ -8,8 +8,11 @@ cluster_version = "1.35"
 node_instance_types = ["t3a.medium"]
 node_count          = 3
 
-# Replace the example address with the public IPv4s of the operator and team.
+# Replace the example with trusted public IPv4 /32s for kubectl and ALB HTTPS.
 team_api_cidrs = ["203.0.113.25/32"]
+
+# Replace with an issued ACM certificate for the team subdomain in this region.
+team_alb_certificate_arn = "arn:aws:acm:ap-northeast-2:123456789012:certificate/00000000-0000-0000-0000-000000000000"
 
 # Optional IAM Identity Center role ARNs for trusted lab operators.
 team_role_arns = []
