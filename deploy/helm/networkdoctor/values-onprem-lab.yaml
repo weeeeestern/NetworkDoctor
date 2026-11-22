@@ -3,6 +3,21 @@
 global:
   clusterName: onprem-lab
 
+# Set actual browser-accessible origins before the demo. Do not use .svc URLs.
+grafana:
+  # Lab Grafana NodePort over Tailscale.
+  url: http://100.122.175.35:32435
+ui:
+  # Backend NodePort over Tailscale (backend.service below).
+  url: http://100.122.175.35:30808
+slack:
+  enabled: true
+  # #incidents in the team workspace.
+  channelID: "C0CG7301YEQ"
+  # Created by hand in the networkdoctor namespace on 2026-11-10 (not in Git).
+  existingSecret: networkdoctor-slack-ux-20261110-044544
+  botTokenKey: bot-token
+
 agent:
   # Verified via node-exporter node_network_up: all three workers use eno1 (1 GbE).
   # The control plane VM uses ens18 and is tainted node-role.kubernetes.io/control-plane.
@@ -13,7 +28,7 @@ agent:
   image:
     # Pinned per commit. CI (agent-image.yml) rewrites this line after it
     # pushes a new image; do not edit the marker comment.
-    tag: main-76d2ee9  # ci: agent-image
+    tag: main-c3d5a60  # ci: agent-image
     pullPolicy: IfNotPresent
   hostNetwork: true
   privileged: true
@@ -56,7 +71,7 @@ backend:
   image:
     # Pinned per commit. CI (backend-image.yml) rewrites this line after it
     # pushes a new image, so Argo CD only goes OutOfSync once the image exists.
-    tag: main-7059a81  # ci: backend-image
+    tag: main-38da188  # ci: backend-image
     pullPolicy: IfNotPresent
   config:
     prometheusURL: http://prometheus-stack-kube-prom-prometheus.monitoring.svc:9090
@@ -72,9 +87,17 @@ backend:
     # the scenarios with facts, no change elsewhere). eval/run.py still picks
     # any architecture per run through POST /eval/runs.
     arch: derived
+    # No incident grouping: every alert gets its own investigation and report.
+    # The 2026-10 ablation runs showed grouped alerts merged into one cause too
+    # often (eval/README.md), and Rule 3 / Rule 5 deserve separate conclusions.
+    correlationWindow: "0s"
   # The key Secret (jev-api) is optional: without it derived+jev is skipped.
   jev:
     enabled: true
+  # Opens the incident UI to browsers so Slack's report links work.
+  service:
+    type: NodePort
+    nodePort: 30808
   persistence:
     # Lab storage comes from the local-path-provisioner child app (default
     # StorageClass `local-path`). storageClass is left empty on purpose so the

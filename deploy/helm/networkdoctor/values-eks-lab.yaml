@@ -7,6 +7,13 @@ global:
   # Match the Terraform name variable when deploying under a custom name.
   clusterName: nd-eks-lab
 
+# Browser origins for the links in Slack and reports: the Gateway hosts from
+# deploy/helm/gateway-routes (<host>.<domain>).
+grafana:
+  url: https://grafana.netdoc.cloud
+ui:
+  url: https://nd.netdoc.cloud
+
 agent:
   # The t3a.medium AL2023 primary ENA uses the systemd slot name ens5.
   # Verify the host's default-route interface on each worker and override

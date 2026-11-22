@@ -148,6 +148,9 @@ affected_resources:
   workloads: ["<workload>"]
   pods: ["<pod>"]
   nodes: ["<node>"]
+summary:
+  symptom: "<one line, Korean: what users saw, with the number and its usual level>"
+  cause: "<one line, Korean: confirmed -> the cause; excluded -> why not this scenario; inconclusive -> what was missing>"
 root_cause: "<one or two sentences; the most likely cause, or why it is excluded>"
 trigger_evidence:
   - source: "<metric query | tool name>"

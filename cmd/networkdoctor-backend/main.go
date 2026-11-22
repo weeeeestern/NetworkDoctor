@@ -27,16 +27,35 @@ import (
 	"networkdoctor-agent/internal/backend/holmes"
 	"networkdoctor-agent/internal/backend/incident"
 	"networkdoctor-agent/internal/backend/investigate"
+	"networkdoctor-agent/internal/backend/links"
+	"networkdoctor-agent/internal/backend/notify"
 	"networkdoctor-agent/internal/backend/prometheus"
 )
 
 func main() {
 	cfg := config.ParseFlags()
 	logger := log.New(os.Stderr, "networkdoctor-backend: ", log.LstdFlags|log.LUTC)
+	publicLinks, err := links.New(cfg.GrafanaURL, cfg.PublicURL)
+	if err != nil {
+		logger.Fatalf("public links: %v", err)
+	}
+	if cfg.SlackEnabled {
+		if strings.TrimSpace(cfg.SlackChannelID) == "" {
+			logger.Fatal("ND_SLACK_CHANNEL_ID is required when Slack is enabled")
+		}
+		if strings.TrimSpace(cfg.SlackBotToken) == "" {
+			logger.Fatal("ND_SLACK_BOT_TOKEN is required when Slack is enabled")
+		}
+	}
 
 	store, err := incident.NewFileStore(cfg.DataDir)
 	if err != nil {
 		logger.Fatalf("open incident store: %v", err)
+	}
+	if count, err := investigate.MarkInterrupted(store); err != nil {
+		logger.Fatalf("mark interrupted investigations: %v", err)
+	} else if count > 0 {
+		logger.Printf("marked %d interrupted investigations; manual reanalysis is available", count)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -92,6 +111,14 @@ func main() {
 		inv = investigate.New(ctx, opts)
 	}
 
+	slackChannel := ""
+	var notificationDone chan struct{}
+	if cfg.SlackEnabled {
+		slackChannel = strings.TrimSpace(cfg.SlackChannelID)
+		worker := notify.NewWorker(notify.Options{Store: store, Sender: notify.NewClient(cfg.SlackBotToken), Links: publicLinks, Logger: logger})
+		notificationDone = make(chan struct{})
+		go func() { defer close(notificationDone); worker.Run(ctx) }()
+	}
 	srv := &http.Server{
 		Addr: cfg.Listen,
 		Handler: api.New(api.Options{
@@ -103,6 +130,8 @@ func main() {
 			AutoInvestigate:   cfg.HolmesAuto,
 			CorrelationWindow: cfg.CorrelationWindow,
 			Eligible:          eligible,
+			SlackChannelID:    slackChannel,
+			Links:             publicLinks,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
@@ -123,6 +152,13 @@ func main() {
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			logger.Fatalf("shutdown: %v", err)
+		}
+		if notificationDone != nil {
+			select {
+			case <-notificationDone:
+			case <-shutdownCtx.Done():
+				logger.Printf("notification shutdown timed out; in-flight state is retained")
+			}
 		}
 	case err := <-errCh:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {

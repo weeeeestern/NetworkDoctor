@@ -23,3 +23,6 @@ runs/
 *.tfvars
 !*.tfvars.example
 *.tfplan
+
+# Brainstorming mockups (local only)
+.superpowers/

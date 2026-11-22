@@ -55,10 +55,21 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ANTI = ("Do not reply with a plan or a status update: keep calling tools until the "
         "investigation is finished, and only then send one final reply that ends with the yaml block.")
 SCHEMA = ("rule_id, scenario, investigation_status, confidence, time_window, affected_resources, "
-          "root_cause, trigger_evidence, supporting_evidence, excluded_alternatives, "
+          "summary, root_cause, trigger_evidence, supporting_evidence, excluded_alternatives, "
           "recommended_actions, additional_checks")
 SHORT_YAML = ("Finish with exactly one fenced ```yaml block "
               "(scenario, investigation_status, confidence, root_cause, recommended_actions).")
+# Same text as koreanOutputRules in internal/backend/holmes/client.go; keep
+# them in sync so the "full" arm asks exactly what the backend asks.
+KOREAN = (
+    'Write every free-text value in the yaml block (summary, root_cause, observation, reason, hypothesis, recommended_actions, additional_checks) in natural Korean, as an on-call engineer would write it:\n'
+    '- summary has two one-line fields. summary.symptom: what users saw, with the number and its usual level, e.g. "catshop 응답 지연 1.8s (평소 120ms)". summary.cause: confirmed -> the cause, e.g. "worker1 NIC 혼잡으로 TCP 재전송 급증"; excluded -> why this scenario is not it, plus the likelier cause if seen; inconclusive -> what was missing to decide.\n'
+    '- Short, direct sentences ending in "~했습니다/~입니다". State what the data shows; do not hedge with "~로 보입니다/~할 수 있습니다" when the numbers are clear.\n'
+    '- No translation-ese: avoid "~에 대해", "~를 통해", "~에 있어", "~에 의해", "~되어지다", "가지고 있다", "~에서의". Use plain verbs instead of nominalizations.\n'
+    '- No filler: no "결론적으로/따라서/즉" openers, no "주목할 만합니다", no emoji, no em dash.\n'
+    '- Terms: 파드, 노드, 서비스, 네임스페이스, 디플로이먼트, 데몬셋, 클러스터, 컨테이너, 레이블. Keep in English: metric names, PromQL, resource and node names, label values, NetworkPolicy, conntrack, CoreDNS, Cilium, Hubble, NIC, TCP, DNS, p99, sRTT.\n'
+    '- Keep every yaml key and these values in English: rule_id, scenario, investigation_status, confidence, and source.\n'
+)
 MIN_LEN, MIN_CALLS = 800, 5
 
 
@@ -84,6 +95,7 @@ def ask_full(a, at, started):
         f"Output Schema ({SCHEMA}).",
         ANTI,
         "",
+        KOREAN,
         "incident_id: inc-ablation",
         f"cluster: {a.cluster}",
         "alert_status: firing",

@@ -23,6 +23,14 @@ type Config struct {
 	// clusters can be told apart later.
 	ClusterName string
 
+	// Public browser addresses are separate from internal evidence/LLM URLs.
+	PublicURL      string
+	GrafanaURL     string
+	SlackEnabled   bool
+	SlackChannelID string
+	// SlackBotToken is read from the environment only, never a CLI argument.
+	SlackBotToken string
+
 	// PrometheusURL is the Prometheus HTTP API base URL used to collect
 	// evidence around an alert. Empty disables evidence collection.
 	PrometheusURL string
@@ -78,6 +86,10 @@ func ParseFlags() Config {
 	flag.StringVar(&cfg.Listen, "listen", envOr("ND_LISTEN", ":8080"), "HTTP listen address")
 	flag.StringVar(&cfg.DataDir, "data-dir", envOr("ND_DATA_DIR", "./data/incidents"), "directory for incident JSON files")
 	flag.StringVar(&cfg.ClusterName, "cluster-name", envOr("ND_CLUSTER_NAME", "unknown"), "cluster name stamped into incidents")
+	flag.StringVar(&cfg.PublicURL, "public-url", envOr("ND_PUBLIC_URL", ""), "public incident UI origin (empty hides external links)")
+	flag.StringVar(&cfg.GrafanaURL, "grafana-url", envOr("ND_GRAFANA_URL", ""), "public Grafana base URL (empty hides links)")
+	flag.BoolVar(&cfg.SlackEnabled, "slack-enabled", envOr("ND_SLACK_ENABLED", "false") == "true", "send notifications for newly created firing incidents")
+	flag.StringVar(&cfg.SlackChannelID, "slack-channel-id", envOr("ND_SLACK_CHANNEL_ID", ""), "Slack channel ID for new incidents")
 	flag.StringVar(&cfg.PrometheusURL, "prometheus-url", envOr("ND_PROMETHEUS_URL", ""), "Prometheus HTTP API base URL (evidence collection, next milestone)")
 	flag.StringVar(&cfg.HolmesURL, "holmes-url", envOr("ND_HOLMES_URL", ""), "HolmesGPT HTTP API base URL (RCA, next milestone)")
 	flag.DurationVar(&cfg.EvidenceWindow, "evidence-window", envDurationOr("ND_EVIDENCE_WINDOW", 15*time.Minute), "PromQL evidence window around the alert")
@@ -96,6 +108,7 @@ func ParseFlags() Config {
 	flag.StringVar(&cfg.JevModel, "jev-model", envOr("ND_JEV_MODEL", "jev-latest"), "Jev model (derived+jev)")
 	flag.Parse()
 	cfg.JevAPIKey = os.Getenv("JEV_API_KEY")
+	cfg.SlackBotToken = os.Getenv("ND_SLACK_BOT_TOKEN")
 	if cfg.EvalDir == "" {
 		// Inside the data volume: the root filesystem is read-only in the chart,
 		// and the incident store ignores subdirectories.

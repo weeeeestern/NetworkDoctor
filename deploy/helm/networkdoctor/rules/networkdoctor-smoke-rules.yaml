@@ -27,8 +27,8 @@ groups:
           rule_id: smoke-0
           scenario: smoke-agent-down
         annotations:
-          summary: "NetworkDoctor agent scrape failing on {{ if $labels.node }}{{ $labels.node }}{{ else }}{{ $labels.instance }}{{ end }}"
-          description: "Prometheus has not been able to scrape the NetworkDoctor agent at {{ $labels.instance }} for 5 minutes."
+          summary: "{{ if $labels.node }}{{ $labels.node }}{{ else }}{{ $labels.instance }}{{ end }}의 NetworkDoctor 에이전트 수집 실패"
+          description: "Prometheus가 5분째 {{ $labels.instance }}의 NetworkDoctor 에이전트를 수집하지 못함."
 
       - alert: NetworkDoctorTCPRetransmitBurstHigh
         # Any retransmit burst in the last 5m. Bursts are already thresholded
@@ -41,8 +41,8 @@ groups:
           rule_id: smoke-1
           scenario: smoke-tcp-retransmit-burst
         annotations:
-          summary: "TCP retransmit bursts on {{ if $labels.node }}{{ $labels.node }}{{ else }}{{ $labels.instance }}{{ end }}"
-          description: "{{ $value | printf \"%.0f\" }} TCP retransmit bursts in the last 5m on {{ $labels.instance }}."
+          summary: "{{ if $labels.node }}{{ $labels.node }}{{ else }}{{ $labels.instance }}{{ end }}에서 TCP 재전송 버스트"
+          description: "최근 5분 동안 {{ $labels.instance }}에서 TCP 재전송 버스트 {{ $value | printf \"%.0f\" }}회."
 
       - alert: NetworkDoctorTCPConnectFailuresHigh
         expr: increase(ebpf_tcp_connect_failed_total[5m]) > 20
@@ -53,8 +53,8 @@ groups:
           rule_id: smoke-2
           scenario: smoke-tcp-connect-failures
         annotations:
-          summary: "TCP connect failures on {{ if $labels.node }}{{ $labels.node }}{{ else }}{{ $labels.instance }}{{ end }}"
-          description: "{{ $value | printf \"%.0f\" }} failed TCP connect attempts in the last 5m on {{ $labels.instance }}."
+          summary: "{{ if $labels.node }}{{ $labels.node }}{{ else }}{{ $labels.instance }}{{ end }}에서 TCP 연결 실패"
+          description: "최근 5분 동안 {{ $labels.instance }}에서 TCP 연결 실패 {{ $value | printf \"%.0f\" }}회."
 
       - alert: NetworkDoctorDNSSlowHigh
         expr: increase(ebpf_dns_slow_total[5m]) > 20
@@ -65,8 +65,8 @@ groups:
           rule_id: smoke-3
           scenario: smoke-dns-slow
         annotations:
-          summary: "Slow DNS responses on {{ if $labels.node }}{{ $labels.node }}{{ else }}{{ $labels.instance }}{{ end }}"
-          description: "{{ $value | printf \"%.0f\" }} DNS responses slower than the agent threshold in the last 5m on {{ $labels.instance }}."
+          summary: "{{ if $labels.node }}{{ $labels.node }}{{ else }}{{ $labels.instance }}{{ end }}에서 DNS 응답 지연"
+          description: "최근 5분 동안 {{ $labels.instance }}에서 에이전트 기준보다 느린 DNS 응답 {{ $value | printf \"%.0f\" }}건."
 
       - alert: NetworkDoctorDNSRcodeErrorsHigh
         expr: increase(ebpf_dns_rcode_errors_total[5m]) > 20
@@ -77,8 +77,8 @@ groups:
           rule_id: smoke-4
           scenario: smoke-dns-rcode-errors
         annotations:
-          summary: "DNS error rcodes on {{ if $labels.node }}{{ $labels.node }}{{ else }}{{ $labels.instance }}{{ end }}"
-          description: "{{ $value | printf \"%.0f\" }} DNS responses with non-zero rcode in the last 5m on {{ $labels.instance }}."
+          summary: "{{ if $labels.node }}{{ $labels.node }}{{ else }}{{ $labels.instance }}{{ end }}에서 DNS 오류 응답"
+          description: "최근 5분 동안 {{ $labels.instance }}에서 rcode가 0이 아닌 DNS 응답 {{ $value | printf \"%.0f\" }}건."
 
       # NetworkDoctorRunqueueLatencyHigh is intentionally NOT enabled yet.
       # The agent exports ebpf_runqlat as a Prometheus histogram built from

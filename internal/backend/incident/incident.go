@@ -95,6 +95,32 @@ type Incident struct {
 	// investigation. CorrelatedIncidents is set on the primary only.
 	CorrelationID       string   `json:"correlation_id,omitempty"`
 	CorrelatedIncidents []string `json:"correlated_incidents,omitempty"`
+
+	SlackNotification *SlackNotification `json:"slack_notification,omitempty"`
+}
+
+// SlackNotification persists delivery receipts and retry state for an enrolled
+// incident. Parent and reply are independent deliveries in the same thread.
+type SlackNotification struct {
+	ChannelID            string               `json:"channel_id"`
+	EnrolledAt           time.Time            `json:"enrolled_at"`
+	Parent               NotificationDelivery `json:"parent"`
+	Reply                NotificationDelivery `json:"reply"`
+	LastSourceIncidentID string               `json:"last_source_incident_id,omitempty"`
+	LastSourceAttempt    int                  `json:"last_source_attempt,omitempty"`
+}
+
+// NotificationDelivery retains the frozen payload and source attempt used for
+// a message so retries do not silently change the diagnosis being delivered.
+type NotificationDelivery struct {
+	State            string     `json:"state"`
+	TS               string     `json:"ts,omitempty"`
+	Attempts         int        `json:"attempts,omitempty"`
+	NextAttemptAt    *time.Time `json:"next_attempt_at,omitempty"`
+	LastErrorCode    string     `json:"last_error_code,omitempty"`
+	Payload          string     `json:"payload,omitempty"`
+	SourceIncidentID string     `json:"source_incident_id,omitempty"`
+	SourceAttempt    int        `json:"source_attempt,omitempty"`
 }
 
 // CorrelationKey is what two incidents must share to be grouped: the first

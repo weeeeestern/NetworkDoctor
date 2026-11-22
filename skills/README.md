@@ -33,15 +33,19 @@ and were not rewritten. Three changes were made on import (2026-09-30):
    `supporting_evidence`, `excluded_alternatives`, `recommended_actions`,
    `additional_checks`). Scenario-specific fields from the original schema
    move under `scenario_details`.
+4. **Summary and Korean (2026-11-10).** The schema gained `summary`
+   (`symptom`, `cause`): the one-line headline the dashboard, the report and
+   the list show. The backend's investigation request asks for every
+   free-text value in Korean (`koreanOutputRules` in
+   `internal/backend/holmes/client.go`); keys and enum values stay English.
 
 ## Editing
 
-Change a skill, merge to `main`, then restart Holmes so the init container
-fetches the new revision:
-
-```bash
-kubectl -n holmesgpt rollout restart deploy/holmesgpt-holmes
-```
+Change a skill and merge to `main`. The `skills-pin` workflow then pins
+`SKILLS_REF` in `deploy/helm/holmesgpt/values.yaml` to that commit, Argo CD
+shows `holmesgpt` OutOfSync, and a sync rolls Holmes so the init container
+fetches the pinned revision. Without the pin the rendered manifest would not
+change and Holmes would keep the skills from its last restart.
 
 Known data gaps on the lab cluster (skills say "if exported" and fall back):
 `cilium_*` agent metrics are not scraped (the existing ServiceMonitor hits

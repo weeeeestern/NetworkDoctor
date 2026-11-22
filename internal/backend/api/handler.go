@@ -19,10 +19,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"networkdoctor-agent/internal/backend/alertmanager"
 	"networkdoctor-agent/internal/backend/incident"
+	"networkdoctor-agent/internal/backend/links"
 	"networkdoctor-agent/internal/backend/report"
 	"networkdoctor-agent/internal/backend/webui"
 )
@@ -54,6 +56,9 @@ type Options struct {
 	CorrelationWindow time.Duration
 	// Eligible decides which incidents take part in grouping (nil = all).
 	Eligible func(*incident.Incident) bool
+	// SlackChannelID enrolls eligible new firing incidents for asynchronous delivery.
+	SlackChannelID string
+	Links          *links.Builder
 }
 
 type handler struct {
@@ -66,6 +71,8 @@ type handler struct {
 	auto         bool
 	window       time.Duration
 	eligible     func(*incident.Incident) bool
+	slackChannel string
+	links        *links.Builder
 }
 
 // New returns the HTTP handler for the backend.
@@ -80,6 +87,8 @@ func New(opts Options) http.Handler {
 		auto:         opts.AutoInvestigate,
 		window:       opts.CorrelationWindow,
 		eligible:     opts.Eligible,
+		slackChannel: opts.SlackChannelID,
+		links:        opts.Links,
 	}
 	if h.now == nil {
 		h.now = time.Now
@@ -206,7 +215,14 @@ func (h *handler) alertmanagerWebhook(w http.ResponseWriter, r *http.Request) {
 		key := a.SourceKey()
 		inc, created, err := h.store.Upsert(key, func(existing *incident.Incident) (*incident.Incident, error) {
 			if existing == nil {
-				return incident.FromAlert(a, meta, now), nil
+				fresh := incident.FromAlert(a, meta, now)
+				if h.slackChannel != "" && !a.IsResolved() && !strings.HasPrefix(fresh.RuleID, "smoke") && (h.eligible == nil || h.eligible(fresh)) {
+					fresh.SlackNotification = &incident.SlackNotification{
+						ChannelID: h.slackChannel, EnrolledAt: now,
+						Parent: incident.NotificationDelivery{State: "pending"},
+					}
+				}
+				return fresh, nil
 			}
 			existing.ApplyDelivery(a, now)
 			return existing, nil
@@ -250,6 +266,7 @@ type IncidentSummary struct {
 	Severity       string     `json:"severity"`
 	RuleID         string     `json:"rule_id"`
 	Scenario       string     `json:"scenario"`
+	ScenarioName   string     `json:"scenario_name"`
 	SymptomSummary string     `json:"symptom_summary"`
 	StartsAt       time.Time  `json:"starts_at"`
 	EndsAt         *time.Time `json:"ends_at"`
@@ -259,6 +276,11 @@ type IncidentSummary struct {
 	HolmesTokens   int        `json:"holmes_total_tokens,omitempty"`
 	HolmesCostUSD  float64    `json:"holmes_cost_usd,omitempty"`
 	CorrelationID  string     `json:"correlation_id,omitempty"`
+	// Headline and Confidence come from the Holmes result so the list shows
+	// "symptom -> likely cause" without a detail fetch.
+	Headline       incident.Headline `json:"headline"`
+	Confidence     string            `json:"confidence,omitempty"`
+	ConfidenceName string            `json:"confidence_name,omitempty"`
 }
 
 func (h *handler) listIncidents(w http.ResponseWriter, r *http.Request) {
@@ -274,6 +296,7 @@ func (h *handler) listIncidents(w http.ResponseWriter, r *http.Request) {
 		if statusFilter != "" && inc.AlertStatus != statusFilter {
 			continue
 		}
+		conf, _ := inc.HolmesResult["confidence"].(string)
 		out = append(out, IncidentSummary{
 			IncidentID:     inc.IncidentID,
 			AlertStatus:    inc.AlertStatus,
@@ -281,6 +304,7 @@ func (h *handler) listIncidents(w http.ResponseWriter, r *http.Request) {
 			Severity:       inc.Severity,
 			RuleID:         inc.RuleID,
 			Scenario:       inc.Scenario,
+			ScenarioName:   inc.ScenarioName(),
 			SymptomSummary: inc.SymptomSummary,
 			StartsAt:       inc.StartsAt,
 			EndsAt:         inc.EndsAt,
@@ -290,6 +314,10 @@ func (h *handler) listIncidents(w http.ResponseWriter, r *http.Request) {
 			HolmesTokens:   inc.HolmesTotalTokens,
 			HolmesCostUSD:  inc.HolmesCostUSD,
 			CorrelationID:  inc.CorrelationID,
+
+			Headline:       inc.Headline(),
+			Confidence:     conf,
+			ConfidenceName: incident.ConfidenceName(conf),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"incidents": out, "count": len(out)})
@@ -306,7 +334,20 @@ func (h *handler) getIncident(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to read incident")
 		return
 	}
-	writeJSON(w, http.StatusOK, inc)
+	// Notification receipts are private durable delivery state. Return a copy
+	// with the same public incident fields and the selected diagnosis.
+	public := *inc
+	public.SlackNotification = nil
+	view := incident.ResolveResult(inc, h.store.Get)
+	conf, _ := view.Result["confidence"].(string)
+	writeJSON(w, http.StatusOK, struct {
+		*incident.Incident
+		Analysis       incident.ResultView `json:"analysis"`
+		Links          links.Links         `json:"links"`
+		Headline       incident.Headline   `json:"headline"`
+		ScenarioName   string              `json:"scenario_name"`
+		ConfidenceName string              `json:"confidence_name,omitempty"`
+	}{&public, view, h.links.For(inc), inc.HeadlineFor(view.Result), inc.ScenarioName(), incident.ConfidenceName(conf)})
 }
 
 func (h *handler) holmesRetry(w http.ResponseWriter, r *http.Request) {
@@ -345,7 +386,7 @@ func (h *handler) reportMarkdown(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-	_, _ = w.Write([]byte(report.Markdown(inc)))
+	_, _ = w.Write([]byte(report.MarkdownWithResult(inc, incident.ResolveResult(inc, h.store.Get))))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

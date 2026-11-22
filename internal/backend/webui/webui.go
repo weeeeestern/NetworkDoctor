@@ -9,6 +9,7 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	"strings"
 )
 
 //go:embed static
@@ -20,5 +21,14 @@ func Handler() http.Handler {
 	if err != nil {
 		panic(err) // embed layout is fixed at build time
 	}
-	return http.FileServer(http.FS(sub))
+	fsrv := http.FileServer(http.FS(sub))
+	// Embedded files carry no modification time, so make browsers refetch
+	// the app shell instead of showing a stale dashboard after an upgrade.
+	// vendor/ is pinned third-party code and may stay cached.
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/vendor/") {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
+		fsrv.ServeHTTP(w, r)
+	})
 }
