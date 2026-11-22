@@ -65,6 +65,12 @@ applications:
                   requests:
                     storage: 20Gi
       grafana:
+        # Public at grafana.<domain>; the login comes from the Secret
+        # Terraform creates (deploy/terraform/envs/eks-lab/grafana.tf).
+        admin:
+          existingSecret: grafana-admin
+          userKey: admin-user
+          passwordKey: admin-password
         sidecar:
           dashboards:
             # searchNamespace already defaults to ALL upstream, so the

@@ -53,16 +53,10 @@ variable "domain" {
   default     = "netdoc.cloud"
 }
 
-variable "team_api_cidrs" {
-  description = "Individual team and Terraform public IPv4 addresses in /32 form, for the EKS API and the Gateway ALB."
-  type        = list(string)
-
-  validation {
-    condition = length(var.team_api_cidrs) > 0 && alltrue([
-      for cidr in var.team_api_cidrs : try(cidrnetmask(cidr) == "255.255.255.255", false)
-    ])
-    error_message = "Enter individual team public IPv4 addresses as /32 CIDRs."
-  }
+variable "admin_role_arns" {
+  description = "IAM role ARNs that get cluster-admin access entries, besides the GitHub Actions role from envs/bootstrap. Include the role you run Terraform or kubectl with locally, or that role is locked out of the cluster."
+  type        = set(string)
+  default     = []
 }
 
 variable "team_role_arns" {

@@ -12,8 +12,10 @@ node_counts         = [2, 1]
 # Zone and wildcard certificate from envs/dns (apply that stack first).
 domain = "netdoc.cloud"
 
-# Replace the example with trusted public IPv4 /32s for kubectl and the Gateway ALB.
-team_api_cidrs = ["203.0.113.25/32"]
+# Cluster admins besides the GitHub Actions role (found automatically). Put the
+# role you run Terraform/kubectl with here: `aws sts get-caller-identity`, and for
+# an SSO session use the IAM role ARN from the IAM console (…/AWSReservedSSO_…).
+admin_role_arns = ["arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/ap-northeast-2/AWSReservedSSO_AdministratorAccess_0000000000000000"]
 
 # Optional IAM Identity Center role ARNs for trusted lab operators.
 team_role_arns = []

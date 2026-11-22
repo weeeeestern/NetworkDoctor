@@ -94,8 +94,9 @@ resource "helm_release" "albc" {
 }
 
 # ---------------------------------------------------------------------------
-# The lab Gateway: one HTTPS:443 listener with the wildcard certificate from
-# envs/dns, reachable only from team_api_cidrs.
+# The lab Gateway: one internet-facing HTTPS:443 listener with the wildcard
+# certificate from envs/dns. There is no login in front of it, so each
+# HTTPRoute limits what it exposes (deploy/helm/gateway-routes).
 # ---------------------------------------------------------------------------
 
 data "aws_acm_certificate" "lab" {
@@ -134,8 +135,7 @@ resource "kubectl_manifest" "gateway_lb_config" {
       namespace = local.gateway_namespace
     }
     spec = {
-      scheme       = "internet-facing"
-      sourceRanges = var.team_api_cidrs
+      scheme = "internet-facing"
       listenerConfigurations = [{
         protocolPort       = "HTTPS:443"
         defaultCertificate = data.aws_acm_certificate.lab.arn

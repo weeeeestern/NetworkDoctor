@@ -51,19 +51,47 @@ module "eks" {
     support_type = "STANDARD"
   }
 
-  # Workers use the private endpoint. Team kubectl and Terraform's Helm
-  # provider use the public endpoint from their allowlisted IPs.
-  cluster_endpoint_private_access          = true
-  cluster_endpoint_public_access           = true
-  cluster_endpoint_public_access_cidrs     = var.team_api_cidrs
-  enable_cluster_creator_admin_permissions = true
+  # Workers use the private endpoint. kubectl, GitHub Actions and Terraform's
+  # Helm/kubectl providers use the public endpoint, open to any source IP
+  # because the team and the Actions runners have no fixed addresses. Every
+  # request still needs an IAM-signed token and a matching access entry.
+  cluster_endpoint_private_access      = true
+  cluster_endpoint_public_access       = true
+  cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]
 
-  access_entries = {
-    for role_arn in var.team_role_arns : role_arn => {
-      principal_arn     = role_arn
-      kubernetes_groups = ["networkdoctor-lab-operators"]
-    }
-  }
+  # Admins are listed explicitly instead of "whoever created the cluster", so
+  # the cluster stays reachable from both GitHub Actions and the operator.
+  enable_cluster_creator_admin_permissions = false
+
+  access_entries = merge(
+    {
+      for role_arn in var.team_role_arns : role_arn => {
+        principal_arn     = role_arn
+        kubernetes_groups = ["networkdoctor-lab-operators"]
+      }
+    },
+    {
+      for role_arn in local.admin_role_arns : role_arn => {
+        principal_arn = role_arn
+        policy_associations = {
+          admin = {
+            policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+            access_scope = { type = "cluster" }
+          }
+        }
+      }
+    },
+  )
+}
+
+# The GitHub Actions role from envs/bootstrap, when it exists. A lookup by
+# name pattern returns an empty set instead of failing before bootstrap.
+data "aws_iam_roles" "github_actions" {
+  name_regex = "^networkdoctor-github-actions$"
+}
+
+locals {
+  admin_role_arns = setunion(data.aws_iam_roles.github_actions.arns, var.admin_role_arns)
 }
 
 # ---------------------------------------------------------------------------

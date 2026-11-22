@@ -24,3 +24,9 @@ output "stateful_zone" {
   description = "Zone the Prometheus and backend nodeSelectors must name."
   value       = var.availability_zones[0]
 }
+
+output "grafana_admin_password" {
+  description = "Login for https://grafana.<domain> (user: admin)."
+  value       = random_password.grafana_admin.result
+  sensitive   = true
+}
