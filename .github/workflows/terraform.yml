@@ -1,0 +1,171 @@
+name: terraform
+
+# Terraform for the AWS EKS lab (deploy/terraform/envs/{dns,eks-lab}).
+#
+#   pull_request       fmt + validate for every stack; plan as well when the
+#                      PR comes from this repository (fork PRs get no AWS
+#                      role) and the repository variables are set.
+#   workflow_dispatch  plan / apply / destroy one stack. Apply and destroy
+#                      run the plan they just printed, nothing else.
+#
+# envs/bootstrap (state bucket + this role) is applied once, locally.
+#
+# Repository variables (Settings → Secrets and variables → Actions →
+# Variables; none of these are secrets):
+#   AWS_ROLE_ARN        envs/bootstrap output github_actions_role_arn
+#   TF_STATE_BUCKET     envs/bootstrap output state_bucket
+#   TF_ADMIN_ROLE_ARNS  optional JSON list, eks-lab var admin_role_arns
+#   TF_TEAM_ROLE_ARNS   optional JSON list, eks-lab var team_role_arns
+
+on:
+  pull_request:
+    paths:
+      - "deploy/terraform/**"
+      - ".github/workflows/terraform.yml"
+  workflow_dispatch:
+    inputs:
+      stack:
+        description: "Stack under deploy/terraform/envs"
+        type: choice
+        options: [dns, eks-lab]
+        required: true
+      action:
+        type: choice
+        options: [plan, apply, destroy]
+        default: plan
+        required: true
+      target:
+        description: "Optional -target (first dns apply: aws_route53_zone.this)"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  AWS_REGION: ap-northeast-2
+  TF_VAR_admin_role_arns: ${{ vars.TF_ADMIN_ROLE_ARNS || '[]' }}
+  TF_VAR_team_role_arns: ${{ vars.TF_TEAM_ROLE_ARNS || '[]' }}
+
+jobs:
+  pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [bootstrap, dns, eks-lab]
+    # One plan per stack at a time; state locks would make a second one wait.
+    concurrency:
+      group: terraform-${{ matrix.stack }}
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: bash # -eo pipefail, so `plan | tee` fails when plan fails
+        working-directory: deploy/terraform/envs/${{ matrix.stack }}
+    env:
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      CAN_PLAN: ${{ matrix.stack != 'bootstrap' && github.event.pull_request.head.repo.full_name == github.repository && vars.AWS_ROLE_ARN != '' && vars.TF_STATE_BUCKET != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform fmt -check -diff
+
+      - name: terraform validate
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+      - name: AWS credentials (OIDC)
+        if: env.CAN_PLAN == 'true'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # -lock=false: a PR plan only reads state and must not block a
+      # concurrent dispatch apply.
+      - name: terraform plan
+        if: env.CAN_PLAN == 'true'
+        run: |
+          terraform init -reconfigure -backend-config="bucket=$TF_STATE_BUCKET"
+          terraform plan -lock=false -no-color | tee plan.txt
+          {
+            echo "### terraform plan — ${{ matrix.stack }}"
+            echo '```'
+            tail -c 60000 plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  dispatch:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: terraform-${{ inputs.stack }}
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: bash # -eo pipefail, so `plan | tee` fails when plan fails
+        working-directory: deploy/terraform/envs/${{ inputs.stack }}
+    env:
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+
+      - name: Check repository variables
+        run: |
+          [ -n "$AWS_ROLE_ARN" ] || { echo "::error::AWS_ROLE_ARN is not set"; exit 1; }
+          [ -n "$TF_STATE_BUCKET" ] || { echo "::error::TF_STATE_BUCKET is not set"; exit 1; }
+
+      - name: AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 7200
+
+      - name: terraform init
+        run: terraform init -backend-config="bucket=$TF_STATE_BUCKET"
+
+      - name: terraform plan
+        env:
+          ACTION: ${{ inputs.action }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          args=(-no-color -out=run.tfplan)
+          [ "$ACTION" = destroy ] && args+=(-destroy)
+          [ -n "$TARGET" ] && args+=("-target=$TARGET")
+          terraform plan "${args[@]}" | tee plan.txt
+          {
+            echo "### terraform plan ($ACTION) — ${{ inputs.stack }}"
+            echo '```'
+            tail -c 60000 plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: terraform apply
+        if: inputs.action != 'plan'
+        run: terraform apply -no-color run.tfplan
+
+      - name: Outputs
+        if: inputs.action == 'apply'
+        run: terraform output -no-color >> "$GITHUB_STEP_SUMMARY"

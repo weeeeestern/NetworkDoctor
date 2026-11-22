@@ -64,6 +64,14 @@ jobs:
             done
           done
 
+      - name: helm lint + template (EKS gateway routes)
+        run: |
+          helm lint deploy/helm/gateway-routes
+          helm template routes deploy/helm/gateway-routes > /tmp/routes.yaml
+          [ "$(grep -c '^kind: HTTPRoute' /tmp/routes.yaml)" -eq 2 ]
+          grep -q 'targetType: ip' /tmp/routes.yaml
+          helm lint deploy/bootstrap -f deploy/bootstrap/eks-lab.yaml
+
       - name: helm lint + template (demo chart)
         run: |
           helm lint deploy/helm/networkdoctor-demo

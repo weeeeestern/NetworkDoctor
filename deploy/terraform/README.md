@@ -20,11 +20,15 @@ Argo CD는 모니터링, NetworkDoctor, HTTPRoute(`gateway-routes`), Cat Shop을
 - **팀은 Gateway API로 만든 ALB에서 HTTPS로 조회한다.** Terraform이 만든
   Gateway를 AWS Load Balancer Controller가 두 퍼블릭 서브넷의 ALB로 만들고,
   HTTPRoute마다 Pod IP를 대상으로 등록한다(NodePort 없음). external-dns가
-  `nd.<domain>`, `grafana.<domain>` 레코드를 Route53에 쓴다. 팀이 등록한 공인
-  IPv4에서만 443 포트로 접근할 수 있다. NetworkDoctor 라우트는 `GET`/`HEAD`만
-  전달하므로 변경 기능은 팀 운영자가 SSO로 접속한 뒤 로컬 포트 전달로 사용한다.
-  Grafana는 로그인과 조회에 `POST`를 쓰므로 모든 메서드를 전달한다.
-  팀원이 다른 네트워크로 이동하면 허용 IP를 갱신한다.
+  `nd.<domain>`, `grafana.<domain>` 레코드를 Route53에 쓴다. **ALB 앞에 로그인이
+  없으므로 누구나 접속할 수 있다.** 그래서 NetworkDoctor 라우트는 `GET`/`HEAD`만
+  전달하고(조회 전용), 변경 기능은 팀 운영자가 SSO로 접속한 뒤 로컬 포트 전달로 사용한다.
+  Grafana는 로그인과 조회에 `POST`를 쓰므로 모든 메서드를 전달하고, Grafana 자체
+  로그인으로 보호한다. 관리자 비밀번호는 Terraform이 만든다.
+- **EKS API 퍼블릭 엔드포인트는 모든 IP에 열려 있다.** 팀원과 GitHub Actions 러너의
+  IP가 고정되어 있지 않기 때문이다. 요청마다 IAM 서명 토큰이 필요하고, 클러스터
+  access entry에 등록된 역할(GitHub Actions 역할, `admin_role_arns`, `team_role_arns`)만
+  권한을 받는다.
 - **Bedrock 호출은 VPC 안에서 끝난다.** `bedrock-runtime` 인터페이스 엔드포인트가
   프라이빗 서브넷에 있고, `llm-gateway/llm-gateway` 서비스 계정이 Pod Identity로
   Claude 모델 호출 권한을 받는다. LLM 게이트웨이 배포는 별도 단계다.
@@ -34,6 +38,40 @@ Argo CD는 모니터링, NetworkDoctor, HTTPRoute(`gateway-routes`), Cat Shop을
   IMDSv2 홉 제한을 적용한다. 호스트 네트워크 수집기는 신뢰된 워크로드로 취급한다.
   Prometheus와 백엔드 데이터는 가용 영역에 종속된 EBS에 저장되므로 둘 다 워커가
   2대인 첫 번째 가용 영역에 고정한다. 그 영역의 워커가 모두 없어지면 복구가 지연될 수 있다.
+
+## 준비. 상태 버킷과 GitHub Actions 역할 (한 번만)
+
+`envs/bootstrap`은 dns·eks-lab 상태를 보관할 S3 버킷(버전 관리, S3 잠금 파일)과
+GitHub Actions가 OIDC로 맡는 IAM 역할 `networkdoctor-github-actions`를 만든다.
+AWS 키를 저장소에 두지 않는다. 역할 권한은 `PowerUserAccess`와 `nd-eks-lab-*` 이름의
+IAM 리소스 관리로 제한한다. 관리자 권한의 로컬 세션에서 한 번 적용한다.
+계정에 GitHub OIDC 공급자가 이미 있으면 `-var create_github_oidc_provider=false`를 붙인다.
+
+```sh
+cd deploy/terraform/envs/bootstrap
+terraform init
+terraform apply
+terraform output
+```
+
+이 스택의 상태 파일(`terraform.tfstate`)은 로컬에 남는다. 커밋하지 말고 운영자가 보관한다.
+저장소 관리자(weeeeestern)가 Settings → Secrets and variables → Actions →
+**Variables**에 아래 값을 등록한다. 비밀 값은 아니다.
+
+| 변수 | 값 |
+|---|---|
+| `AWS_ROLE_ARN` | `terraform output -raw github_actions_role_arn` |
+| `TF_STATE_BUCKET` | `terraform output -raw state_bucket` |
+| `TF_ADMIN_ROLE_ARNS` | 로컬에서 kubectl을 쓸 운영자 역할 ARN의 JSON 목록. 예: `["arn:aws:iam::…:role/…/AWSReservedSSO_…"]` |
+| `TF_TEAM_ROLE_ARNS` | 선택. `team_role_arns`와 같은 JSON 목록 |
+
+로컬에서 dns·eks-lab을 실행할 때도 같은 버킷을 쓴다. 이후 단계의 `terraform init`은
+모두 아래처럼 버킷을 넘긴다.
+
+```sh
+state_bucket=$(terraform -chdir=deploy/terraform/envs/bootstrap output -raw state_bucket)
+terraform -chdir=deploy/terraform/envs/dns init -backend-config="bucket=$state_bucket"
+```
 
 ## 0. DNS 스택 (한 번만)
 
@@ -46,9 +84,13 @@ Argo CD는 모니터링, NetworkDoctor, HTTPRoute(`gateway-routes`), Cat Shop을
 네임서버 변경은 전파에 수 시간이 걸릴 수 있으므로 **시연 하루 전까지** 마친다.
 영역을 먼저 만들고, 네임서버를 바꾼 뒤 인증서 검증까지 적용한다.
 
+GitHub에서는 Actions → terraform → Run workflow에서 `stack=dns`, `action=apply`,
+`target=aws_route53_zone.this`로 첫 적용을, 위임 확인 후 `target` 없이 두 번째 적용을
+실행한다. 로컬에서는 다음과 같다.
+
 ```sh
 cd deploy/terraform/envs/dns
-terraform init
+terraform init -backend-config="bucket=$state_bucket"
 terraform apply -target=aws_route53_zone.this
 terraform output name_servers
 ```
@@ -98,9 +140,13 @@ aws acm list-certificates --region ap-northeast-2 \
 
 저장소 루트에서 시작한다. 기존 `terraform.tfvars`는 보존하고 직접 수정한다.
 
-- `team_api_cidrs`에 Terraform 실행 컴퓨터와 팀원이 사용하는 실제 공인 IPv4를
-  각각 `/32`로 넣는다. 이 목록은 EKS API와 Gateway ALB에 함께 적용된다. 팀이 관리하는
-  접속망의 주소를 사용한다.
+- `admin_role_arns`에 로컬에서 Terraform이나 kubectl을 실행할 역할 ARN을 넣는다.
+  클러스터 관리자는 "클러스터를 만든 주체"가 아니라 GitHub Actions 역할과 이 목록이다.
+  **여기에 없는 역할로 로컬 apply를 하면 클러스터 안 설치 단계에서 권한 오류가 나고
+  kubectl도 쓸 수 없다.** SSO 세션이면 `aws sts get-caller-identity`의 역할 이름으로
+  IAM 콘솔에서 전체 역할 ARN(`…/AWSReservedSSO_…`)을 찾는다. GitHub Actions에서는
+  `TF_ADMIN_ROLE_ARNS` 변수가 이 값이다. 두 곳의 목록을 같게 유지한다. 다르면
+  실행할 때마다 access entry가 추가·삭제된다.
 - `domain`은 `envs/dns`와 같은 값으로 둔다.
 - `availability_zones`의 첫 영역을 바꾸면 `deploy/bootstrap/eks-lab.yaml`
   (Prometheus)과 `deploy/helm/networkdoctor/values-eks-lab.yaml`(backend)의
@@ -108,8 +154,8 @@ aws acm list-certificates --region ap-northeast-2 \
 - 팀 운영자가 직접 접속해야 하면 `team_role_arns`에 IAM 콘솔의 전체 SSO 역할
   ARN(`arn:aws:iam::…:role/…/AWSReservedSSO_…`)을 넣는다.
 
-예전 입력의 `node_count`와 `team_alb_certificate_arn`은 제거하고 `node_counts`,
-`availability_zones`, `domain`을 새 예시대로 넣는다.
+예전 입력의 `node_count`, `team_alb_certificate_arn`, `team_api_cidrs`는 제거하고
+`node_counts`, `availability_zones`, `domain`, `admin_role_arns`를 새 예시대로 넣는다.
 
 ```sh
 cd deploy/terraform/envs/eks-lab
@@ -121,10 +167,14 @@ fi
 입력값을 확인한 후 계획을 만든다.
 
 ```sh
-terraform init
+terraform init -backend-config="bucket=$state_bucket"
 terraform plan -out=lab.tfplan
 terraform show lab.tfplan
 ```
+
+GitHub에서는 Run workflow에서 `stack=eks-lab`, `action=plan`으로 계획을 보고,
+같은 입력에 `action=apply`로 적용한다. 실행 요약에 계획과 출력이 남는다.
+이어지는 Argo CD 등록·동기화와 Secret 등록은 `admin_role_arns`의 역할로 로컬에서 한다.
 
 이 구성은 **신규 시연 클러스터** 기준이다. 계획에서 기존 환경의 교체·삭제가
 보이면 적용을 멈추고 상태와 계정을 확인한다. 이전 구성(세 가용 영역, Terraform이
@@ -227,7 +277,7 @@ HolmesGPT를 쓸 때만 `holmesgpt` 네임스페이스를 먼저 만든다. EKS�
 
 `gateway-routes`를 동기화하면 Load Balancer Controller가 ALB에 라우트를 붙이고
 external-dns가 Route53 레코드를 만든다. Gateway가 `Programmed`이고 라우트가
-`Accepted`인지 확인한 뒤 허용된 팀 IPv4에서 접속한다. `GET`은 성공하고, `POST`는
+`Accepted`인지 확인한 뒤 접속한다. `GET`은 성공하고, `POST`는
 라우트에 일치하지 않아 ALB 기본 응답(4xx)을 받는다(NetworkDoctor 라우트는 `GET`/`HEAD`만 일치).
 
 ```sh
@@ -242,10 +292,18 @@ curl -4 -sS --max-time 15 -o /dev/null -w '%{http_code}\n' -X POST https://nd.ne
 DNS가 아직 없으면 `kubectl -n kube-system logs deploy/external-dns`에서 레코드 생성을
 확인한다. 대상이 `unhealthy`이면 EC2 콘솔의 대상 그룹에서 Pod IP와 헬스체크 경로를 본다.
 
+Grafana(`https://grafana.netdoc.cloud`)는 `admin`과 다음 비밀번호로 로그인한다.
+GitHub Actions로 적용했다면 같은 버킷으로 로컬 `init` 후 읽거나 Secret에서 읽는다.
+
+```sh
+terraform -chdir=deploy/terraform/envs/eks-lab output -raw grafana_admin_password
+kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d
+```
+
 ### 팀 운영자 SSO·포트 전달
 
 `team_role_arns`에는 신뢰된 팀 운영자의 SSO IAM 역할 ARN만 넣는다.
-클러스터 생성 관리자 역할은 이 목록에서 제외한다. 별도 SSO 역할에
+`admin_role_arns`에 넣은 관리자 역할은 이 목록에서 제외한다. 별도 SSO 역할에
 `eks:DescribeCluster`가 필요하다. 배포 후 팀원 접속을 추가하는 경우 같은
 Terraform 상태에서 입력을 갱신하고 다시 계획·적용한다. Kubernetes 권한은
 `networkdoctor` 내 Pod 포트 전달을 허용한다. 백엔드 변경 기능과 호스트 네트워크
@@ -345,7 +403,8 @@ monitoring 설치 전에 중단한 랩은 등록되지 않은 리소스 유형�
    탄력적 IP(EIP), Bedrock 엔드포인트를 포함해 랩에서 만든 리소스만 지워지는지
    확인한다. ALB와 대상 그룹은 Terraform 상태에 없다. Terraform이 Gateway를
    먼저 지우고, Load Balancer Controller가 ALB를 지울 때까지 기다린 뒤 컨트롤러와
-   VPC를 지운다. `envs/dns`는 계획 대상이 아니다.
+   VPC를 지운다. `envs/dns`는 계획 대상이 아니다. GitHub에서는 Run workflow에서
+   `stack=eks-lab`, `action=destroy`로 계획 확인과 적용을 한 번에 실행한다.
 
 ```sh
 terraform -chdir=deploy/terraform/envs/eks-lab plan -destroy -out=lab-destroy.tfplan
