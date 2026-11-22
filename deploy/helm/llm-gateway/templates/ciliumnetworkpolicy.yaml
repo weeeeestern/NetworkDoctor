@@ -1,0 +1,56 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: llm-gateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "llm-gateway.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- include "llm-gateway.selectorLabels" . | nindent 6 }}
+  ingress:
+    - fromEndpoints:
+        {{- range .Values.networkPolicy.clients }}
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ .namespace }}
+            {{- toYaml .labels | nindent 12 }}
+        {{- end }}
+      toPorts:
+        - ports:
+            - port: {{ .Values.port | quote }}
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # EKS Pod Identity agent on the node (169.254.170.23:80) hands out the
+    # Bedrock credentials. Listed both ways: Cilium may classify the
+    # link-local address as the host or as a plain CIDR.
+    - toEntities:
+        - host
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+    - toCIDR:
+        - 169.254.170.23/32
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+    - toCIDR:
+        {{- toYaml .Values.networkPolicy.bedrockEndpointCIDRs | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+{{- end }}

@@ -119,3 +119,9 @@ holmes:
       memory: 512Mi
     limits:
       memory: 2Gi
+
+# CiliumNetworkPolicy for the Holmes pod (templates/ciliumnetworkpolicy.yaml).
+# Off by default: the on-prem lab keeps its current behaviour.
+networkPolicy:
+  enabled: false
+  clients: []

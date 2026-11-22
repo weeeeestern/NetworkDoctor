@@ -11,7 +11,6 @@ output "lab_urls" {
   value = {
     networkdoctor = "https://nd.${var.domain}"
     grafana       = "https://grafana.${var.domain}"
-    holmes        = "https://holmes.${var.domain}"
   }
 }
 

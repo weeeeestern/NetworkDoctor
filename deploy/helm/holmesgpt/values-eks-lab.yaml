@@ -30,3 +30,11 @@ holmes:
     prometheus/metrics:
       config:
         prometheus_url: http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090
+
+networkPolicy:
+  enabled: true
+  clients:
+    - namespace: networkdoctor
+      labels:
+        app.kubernetes.io/name: networkdoctor
+        app.kubernetes.io/component: backend

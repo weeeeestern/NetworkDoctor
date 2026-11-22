@@ -10,8 +10,9 @@ variable "region" {
 }
 
 variable "vpc_cidr" {
-  type    = string
-  default = "10.80.0.0/16"
+  description = "Also the Bedrock egress range in deploy/helm/llm-gateway/values.yaml (networkPolicy.bedrockEndpointCIDRs); change both together."
+  type        = string
+  default     = "10.80.0.0/16"
 }
 
 variable "cluster_version" {
