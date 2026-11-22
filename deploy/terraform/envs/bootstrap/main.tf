@@ -115,10 +115,16 @@ locals {
   : data.aws_iam_openid_connect_provider.github[0].arn)
 }
 
-# Any workflow run in this repository: pull requests from its own branches
-# (plan) and manual dispatches (apply/destroy). GitHub issues no OIDC token
-# to pull requests from forks, so outside contributors never get the role.
-data "aws_iam_policy_document" "github_actions_assume" {
+# Two roles, split by where the workflow runs (the token's `sub` claim):
+#
+#   plan   read-only; pull requests from this repository and dispatch runs
+#          on any branch. A PR can change the workflow file, so anything a
+#          PR can reach must be harmless.
+#   apply  writes; only runs on main, i.e. code that went through review.
+#
+# GitHub issues no OIDC token to pull requests from forks. Neither job may
+# set `environment:`, which would change `sub` to environment:<name>.
+data "aws_iam_policy_document" "github_actions_plan_assume" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
 
@@ -136,16 +142,75 @@ data "aws_iam_policy_document" "github_actions_assume" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:*"]
+      values = [
+        "repo:${var.github_repository}:pull_request",
+        "repo:${var.github_repository}:ref:refs/heads/*",
+      ]
     }
   }
 }
 
-# The name is fixed: envs/eks-lab finds this role by name and makes it a
-# cluster admin.
+data "aws_iam_policy_document" "github_actions_apply_assume" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [local.github_oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${var.github_repository}:ref:refs/heads/main"]
+    }
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Plan role: AWS read-only, state read, and lock files for dispatch plans.
+# envs/eks-lab gives it a cluster view access entry (by this name).
+# ---------------------------------------------------------------------------
+
+resource "aws_iam_role" "github_actions_plan" {
+  name                 = "networkdoctor-github-actions-plan"
+  assume_role_policy   = data.aws_iam_policy_document.github_actions_plan_assume.json
+  max_session_duration = 3600
+}
+
+resource "aws_iam_role_policy_attachment" "github_actions_plan_read_only" {
+  role       = aws_iam_role.github_actions_plan.name
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
+}
+
+data "aws_iam_policy_document" "github_actions_plan_state" {
+  statement {
+    sid       = "StateLockFiles"
+    actions   = ["s3:PutObject", "s3:DeleteObject"]
+    resources = ["${aws_s3_bucket.state.arn}/*.tflock"]
+  }
+}
+
+resource "aws_iam_role_policy" "github_actions_plan_state" {
+  name   = "state-lock"
+  role   = aws_iam_role.github_actions_plan.id
+  policy = data.aws_iam_policy_document.github_actions_plan_state.json
+}
+
+# ---------------------------------------------------------------------------
+# Apply role. The name is fixed: envs/eks-lab finds it by name and makes it
+# a cluster admin.
+# ---------------------------------------------------------------------------
+
 resource "aws_iam_role" "github_actions" {
   name                 = "networkdoctor-github-actions"
-  assume_role_policy   = data.aws_iam_policy_document.github_actions_assume.json
+  assume_role_policy   = data.aws_iam_policy_document.github_actions_apply_assume.json
   max_session_duration = 7200 # an EKS create or destroy can take ~30 minutes
 }
 

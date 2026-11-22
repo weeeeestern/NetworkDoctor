@@ -3,7 +3,12 @@ output "state_bucket" {
   value       = aws_s3_bucket.state.bucket
 }
 
-output "github_actions_role_arn" {
-  description = "Repository variable AWS_ROLE_ARN."
+output "github_actions_apply_role_arn" {
+  description = "Repository variable AWS_APPLY_ROLE_ARN (main branch only)."
   value       = aws_iam_role.github_actions.arn
+}
+
+output "github_actions_plan_role_arn" {
+  description = "Repository variable AWS_PLAN_ROLE_ARN (pull requests and any branch)."
+  value       = aws_iam_role.github_actions_plan.arn
 }

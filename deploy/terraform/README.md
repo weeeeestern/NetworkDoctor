@@ -42,9 +42,17 @@ Argo CD는 모니터링, NetworkDoctor, HTTPRoute(`gateway-routes`), Cat Shop을
 ## 준비. 상태 버킷과 GitHub Actions 역할 (한 번만)
 
 `envs/bootstrap`은 dns·eks-lab 상태를 보관할 S3 버킷(버전 관리, S3 잠금 파일)과
-GitHub Actions가 OIDC로 맡는 IAM 역할 `networkdoctor-github-actions`를 만든다.
-AWS 키를 저장소에 두지 않는다. 역할 권한은 `PowerUserAccess`와 `nd-eks-lab-*` 이름의
-IAM 리소스 관리로 제한한다. 관리자 권한의 로컬 세션에서 한 번 적용한다.
+GitHub Actions가 OIDC로 맡는 IAM 역할 두 개를 만든다. AWS 키를 저장소에 두지 않는다.
+
+- `networkdoctor-github-actions-plan` — 읽기 전용(`ReadOnlyAccess`, 클러스터 조회).
+  저장소 브랜치의 PR과 모든 브랜치의 수동 plan이 쓴다. PR이 워크플로를 고쳐도
+  이 역할 이상은 얻지 못한다.
+- `networkdoctor-github-actions` — apply·destroy용(`PowerUserAccess`와 `nd-eks-lab-*`
+  이름의 IAM 리소스 관리, 클러스터 관리자). **`main` 브랜치에서 실행된 워크플로만**
+  맡을 수 있으므로 리뷰를 거쳐 머지된 코드만 적용된다. 저장소 관리자가 `main`에
+  브랜치 보호(PR 필수)를 걸어 두어야 이 제한이 의미가 있다.
+
+관리자 권한의 로컬 세션에서 한 번 적용한다.
 계정에 GitHub OIDC 공급자가 이미 있으면 `-var create_github_oidc_provider=false`를 붙인다.
 
 ```sh
@@ -60,7 +68,8 @@ terraform output
 
 | 변수 | 값 |
 |---|---|
-| `AWS_ROLE_ARN` | `terraform output -raw github_actions_role_arn` |
+| `AWS_PLAN_ROLE_ARN` | `terraform output -raw github_actions_plan_role_arn` |
+| `AWS_APPLY_ROLE_ARN` | `terraform output -raw github_actions_apply_role_arn` |
 | `TF_STATE_BUCKET` | `terraform output -raw state_bucket` |
 | `TF_ADMIN_ROLE_ARNS` | 로컬에서 kubectl을 쓸 운영자 역할 ARN의 JSON 목록. 예: `["arn:aws:iam::…:role/…/AWSReservedSSO_…"]` |
 | `TF_TEAM_ROLE_ARNS` | 선택. `team_role_arns`와 같은 JSON 목록 |
@@ -84,7 +93,7 @@ terraform -chdir=deploy/terraform/envs/dns init -backend-config="bucket=$state_b
 네임서버 변경은 전파에 수 시간이 걸릴 수 있으므로 **시연 하루 전까지** 마친다.
 영역을 먼저 만들고, 네임서버를 바꾼 뒤 인증서 검증까지 적용한다.
 
-GitHub에서는 Actions → terraform → Run workflow에서 `stack=dns`, `action=apply`,
+GitHub에서는 Actions → terraform → Run workflow에서 브랜치 `main`, `stack=dns`, `action=apply`,
 `target=aws_route53_zone.this`로 첫 적용을, 위임 확인 후 `target` 없이 두 번째 적용을
 실행한다. 로컬에서는 다음과 같다.
 
@@ -172,8 +181,8 @@ terraform plan -out=lab.tfplan
 terraform show lab.tfplan
 ```
 
-GitHub에서는 Run workflow에서 `stack=eks-lab`, `action=plan`으로 계획을 보고,
-같은 입력에 `action=apply`로 적용한다. 실행 요약에 계획과 출력이 남는다.
+GitHub에서는 Run workflow에서 `stack=eks-lab`, `action=plan`으로 계획을 보고(아무 브랜치),
+브랜치 `main`에서 `action=apply`로 적용한다. 실행 요약에 계획과 출력이 남는다.
 이어지는 Argo CD 등록·동기화와 Secret 등록은 `admin_role_arns`의 역할로 로컬에서 한다.
 
 이 구성은 **신규 시연 클러스터** 기준이다. 계획에서 기존 환경의 교체·삭제가

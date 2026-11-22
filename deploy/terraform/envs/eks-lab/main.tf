@@ -81,13 +81,30 @@ module "eks" {
         }
       }
     },
+    {
+      for role_arn in data.aws_iam_roles.github_actions_plan.arns : role_arn => {
+        principal_arn = role_arn
+        policy_associations = {
+          view = {
+            policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSAdminViewPolicy"
+            access_scope = { type = "cluster" }
+          }
+        }
+      }
+    },
   )
 }
 
-# The GitHub Actions role from envs/bootstrap, when it exists. A lookup by
+# The GitHub Actions roles from envs/bootstrap, when they exist. A lookup by
 # name pattern returns an empty set instead of failing before bootstrap.
+# The apply role is a cluster admin; the plan role may only read (including
+# Secrets, which plans of the Helm releases need).
 data "aws_iam_roles" "github_actions" {
   name_regex = "^networkdoctor-github-actions$"
+}
+
+data "aws_iam_roles" "github_actions_plan" {
+  name_regex = "^networkdoctor-github-actions-plan$"
 }
 
 locals {
