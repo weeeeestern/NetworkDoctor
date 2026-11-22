@@ -147,16 +147,40 @@ aws acm list-certificates --region ap-northeast-2 \
 
 `availability_zones`의 두 영역이 `t3a.medium` 제공 목록에 있어야 한다.
 
-LLM 분석에는 Bedrock의 Claude 모델이 필요하다. 처음 한 번, Bedrock 콘솔(서울 리전)의
-모델 액세스에서 Anthropic Claude 사용을 신청하고, 게이트웨이가 쓰는 모델 ID
-(`deploy/helm/llm-gateway/values.yaml`의 `models`)가 이 계정에서 호출 가능한
-추론 프로파일인지 확인한다.
+LLM 분석에는 Bedrock의 Claude 모델이 필요하다. 계정 관리자가 AWS 콘솔에서 두 가지를
+확인한다. **시연 며칠 전에** 한다(쿼터 증가는 승인에 며칠 걸릴 수 있다).
 
-```sh
-aws bedrock list-inference-profiles --region ap-northeast-2 \
-  --query 'inferenceProfileSummaries[?contains(inferenceProfileId, `anthropic`)].[inferenceProfileId,status]' \
-  --output table
-```
+1. **모델 액세스 — 써도 되는가.** Anthropic 모델은 계정에서 처음 쓸 때 사용 사례
+   양식을 한 번 제출해야 한다(단체 이름, 용도). Bedrock 콘솔(서울 리전) → 모델
+   카탈로그 → Claude Sonnet 4.5와 Claude Haiku 4.5에서 액세스를 요청한다. 보통 바로
+   승인된다. 콘솔 플레이그라운드에서 답이 오면 된 것이다. 액세스가 없으면 게이트웨이가
+   `AccessDeniedException`을 받는다. 게이트웨이 모델 ID(`deploy/helm/llm-gateway/values.yaml`의
+   `models`)가 이 계정에서 호출 가능한 추론 프로파일인지도 확인한다.
+
+   ```sh
+   aws bedrock list-inference-profiles --region ap-northeast-2 \
+     --query 'inferenceProfileSummaries[?contains(inferenceProfileId, `anthropic`)].[inferenceProfileId,status]' \
+     --output table
+   ```
+
+2. **쿼터 — 얼마나 쓸 수 있는가.** 모델마다 분당 토큰(TPM)·분당 요청(RPM)·일 단위
+   토큰 한도가 있고, 새 계정은 낮거나 0일 수 있다. 넘으면 `ThrottlingException`(429)이
+   난다. 게이트웨이는 재시도 후 Haiku로 대체하지만 Haiku 쿼터도 낮으면 RCA가 실패한다.
+   Holmes는 분석 한 번에 최대 20단계를 돌며 매 단계 누적된 도구 결과를 다시 보내므로
+   몇 분 안에 수십만 토큰을 쓸 수 있다. Claude 최신 모델은 출력 토큰을 쿼터에서 몇 배로
+   센다. 게이트웨이는 `global.` 추론 프로파일을 쓰므로 이름에 **Global cross-region**이
+   들어간 항목을 본다.
+
+   ```sh
+   aws service-quotas list-service-quotas --service-code bedrock --region ap-northeast-2 \
+     --query "Quotas[?contains(QuotaName, 'Sonnet 4.5') || contains(QuotaName, 'Haiku 4.5')].[QuotaName,Value,Adjustable]" \
+     --output table
+   ```
+
+   Sonnet의 Global cross-region TPM이 수십만 이상이면 분석을 하나씩 돌리는 랩(backend
+   `workers: 1`)에 충분하다. 수만 이하이거나 0이면 Service Quotas 콘솔 → Amazon Bedrock에서
+   해당 항목을 골라 계정 수준 증가를 요청한다. `Adjustable`이 `False`인 항목은 AWS Support
+   케이스로 요청한다. Sonnet 4.5 기준 분석 한 번에 $1 안팎이 들 수 있다.
 
 서울 리전의 **Running On-Demand Standard instances**에 기존 사용분과 용량 예약을
 제외하고도 **6 vCPU**가 남아 있어야 한다. 콘솔의 Service Quotas에서 적용 한도와
