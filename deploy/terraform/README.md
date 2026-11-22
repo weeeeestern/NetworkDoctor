@@ -9,7 +9,8 @@
 
 Argo CD는 모니터링, NetworkDoctor, HTTPRoute(`gateway-routes`), Cat Shop을 배포한다.
 시연 전에는 **워커 3대에서 수집기가 실행되고, 같은 알림이 백엔드에 기록되며
-팀 Slack에 도착하는지** 확인한다. HolmesGPT는 선택 사항이다.
+팀 Slack에 도착하는지** 확인한다. LLM 분석(RCA)은 HolmesGPT와 클러스터 안 LLM
+게이트웨이가 Bedrock으로 수행한다.
 
 - **EKS 1.35 표준 지원, Cilium 1.19.10, AL2023 x86-64 워커.** 두 가용 영역에
   노드 그룹을 하나씩 두고 온디맨드 `t3a.medium`을 `node_counts`(기본 2대·1대)로
@@ -30,8 +31,11 @@ Argo CD는 모니터링, NetworkDoctor, HTTPRoute(`gateway-routes`), Cat Shop을
   access entry에 등록된 역할(GitHub Actions 역할, `admin_role_arns`, `team_role_arns`)만
   권한을 받는다.
 - **Bedrock 호출은 VPC 안에서 끝난다.** `bedrock-runtime` 인터페이스 엔드포인트가
-  프라이빗 서브넷에 있고, `llm-gateway/llm-gateway` 서비스 계정이 Pod Identity로
-  Claude 모델 호출 권한을 받는다. LLM 게이트웨이 배포는 별도 단계다.
+  프라이빗 서브넷에 있고, LiteLLM 게이트웨이(`llm-gateway` 앱, DB 없음)의 서비스 계정이
+  Pod Identity로 Claude 모델 호출 권한을 받는다. 게이트웨이와 Holmes가 쓰는 키는
+  Terraform이 만들어 두 네임스페이스의 Secret에 넣는다. Cilium 정책으로 게이트웨이는
+  Holmes에게서만 요청을 받고, DNS·Pod Identity·Bedrock 엔드포인트로만 나간다.
+  Holmes는 NetworkDoctor backend에게서만 요청을 받는다.
 - Cilium은 VPC CNI 위에서 네트워크 정책과 Hubble 메트릭을 제공한다. VPC CNI는
   IRSA, EBS CSI·Load Balancer Controller·external-dns는 Pod Identity로 각자의
   IAM 역할을 사용한다. 일반 Pod의 EC2 메타데이터 접근에는
@@ -143,6 +147,17 @@ aws acm list-certificates --region ap-northeast-2 \
 
 `availability_zones`의 두 영역이 `t3a.medium` 제공 목록에 있어야 한다.
 
+LLM 분석에는 Bedrock의 Claude 모델이 필요하다. 처음 한 번, Bedrock 콘솔(서울 리전)의
+모델 액세스에서 Anthropic Claude 사용을 신청하고, 게이트웨이가 쓰는 모델 ID
+(`deploy/helm/llm-gateway/values.yaml`의 `models`)가 이 계정에서 호출 가능한
+추론 프로파일인지 확인한다.
+
+```sh
+aws bedrock list-inference-profiles --region ap-northeast-2 \
+  --query 'inferenceProfileSummaries[?contains(inferenceProfileId, `anthropic`)].[inferenceProfileId,status]' \
+  --output table
+```
+
 서울 리전의 **Running On-Demand Standard instances**에 기존 사용분과 용량 예약을
 제외하고도 **6 vCPU**가 남아 있어야 한다. 콘솔의 Service Quotas에서 적용 한도와
 사용량을 확인한다. 부족하면 한도가 늘어난 후 배포한다. 워커가 생성에 실패해도
@@ -245,6 +260,10 @@ kubectl -n argocd patch application networkdoctor-root --type=merge -p "$sync_op
 kubectl -n argocd get application networkdoctor-root -w
 kubectl -n argocd patch application monitoring --type=merge -p "$sync_operation"
 kubectl -n argocd get application monitoring -w
+kubectl -n argocd patch application llm-gateway --type=merge -p "$sync_operation"
+kubectl -n argocd get application llm-gateway -w
+kubectl -n argocd patch application holmesgpt --type=merge -p "$sync_operation"
+kubectl -n argocd get application holmesgpt -w
 kubectl -n argocd patch application networkdoctor --type=merge -p "$sync_operation"
 kubectl -n argocd get application networkdoctor -w
 kubectl -n argocd patch application gateway-routes --type=merge -p "$sync_operation"
@@ -269,13 +288,37 @@ Prometheus의 `http://localhost:19090/targets`에서 Cat Shop·Cilium·Hubble �
 `3`이어야 한다. `Pending` PVC가 있으면 `gp2` StorageClass와 EBS CSI 컨트롤러
 이벤트를 확인하고 시연은 원인이 해소된 후 진행한다.
 
-HolmesGPT를 쓸 때만 `holmesgpt` 네임스페이스를 먼저 만든다. EKS에서 접근할 수
-있는 게이트웨이 URL을 Holmes EKS Helm 값의 `holmes.modelList.<모델>.api_base`에
-지정하고 `holmes-llm` Secret의 `LLM_GATEWAY_KEY`를 등록한다. Holmes 앱을
-동기화해 준비된 뒤, NetworkDoctor EKS 값의 `backend.config.holmesURL`을
-`http://holmesgpt-holmes.holmesgpt.svc:80`으로 바꾸고 다시 동기화한다.
-클러스터 안의 LLM 게이트웨이는 `llm-gateway` 네임스페이스의 `llm-gateway`
-서비스 계정으로 띄운다. Terraform이 그 계정에 Bedrock Pod Identity를 미리 연결해 둔다.
+### LLM 분석 (LLM 게이트웨이 + HolmesGPT)
+
+위 동기화 블록은 `llm-gateway`와 `holmesgpt`를 `networkdoctor`보다 **먼저** 올린다.
+backend는 `holmesURL`이 설정되어 있어 인시던트마다 한 번 자동 분석을 요청하는데,
+Holmes가 준비되기 전에 생긴 인시던트는 분석 실패로 남고 다시 시도하지 않는다.
+두 앱의 Secret(`llm-gateway/llm-gateway`, `holmesgpt/holmes-llm`)은 Terraform이 만든다.
+Bedrock 모델 액세스는 1단계에서 확인했다.
+
+게이트웨이에서 Bedrock 호출을 직접 확인한다. 응답에 모델 답변이 오면 Pod Identity,
+VPC 엔드포인트, 모델 액세스가 모두 맞다. 한 줄씩 실행한다.
+
+```sh
+kubectl -n llm-gateway logs deploy/llm-gateway --tail=20
+kubectl -n llm-gateway port-forward svc/llm-gateway 4000:4000 &
+sleep 3  # port-forward가 포트를 열 때까지
+gateway_key=$(kubectl -n llm-gateway get secret llm-gateway -o jsonpath='{.data.LITELLM_MASTER_KEY}' | base64 -d)
+curl -sS http://localhost:4000/v1/chat/completions -H "Authorization: Bearer $gateway_key" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"claude-haiku","messages":[{"role":"user","content":"ping"}],"max_tokens":16}'
+kill %1
+```
+
+`AccessDeniedException`이면 모델 액세스 또는 IAM·엔드포인트 정책을, 시간 초과이면
+게이트웨이 Pod의 Cilium 정책 drop(`hubble_drop_total`)을 확인한다. 정상 동작에서
+이 정책들은 drop을 만들지 않는다. drop이 생기면 Rule 8 알림이 뜨므로 원인을 먼저
+해소한다. 급하면 해당 차트의 `networkPolicy.enabled`를 `false`로 바꿔 동기화한다.
+
+키는 Terraform 상태에 고정되어 있어 평소에는 바뀌지 않는다. 상태를 잃었거나 키
+리소스를 다시 만들었다면 두 Pod가 새 키를 읽도록 재시작한다
+(`kubectl -n llm-gateway rollout restart deploy/llm-gateway`,
+`kubectl -n holmesgpt rollout restart deploy/holmesgpt-holmes`).
 
 ### 팀 HTTPS 접속
 
@@ -392,7 +435,7 @@ NAT Gateway 1개에 $7.08, ALB 1개에 $2.70, Bedrock 인터페이스 엔드포�
 kubectl -n networkdoctor delete prometheusrule networkdoctor-eks-alert-smoke --ignore-not-found &&
 kubectl -n networkdoctor delete alertmanagerconfig networkdoctor-slack --ignore-not-found &&
 kubectl -n argocd delete application networkdoctor-root --ignore-not-found &&
-kubectl -n argocd delete application gateway-routes networkdoctor-demo networkdoctor holmesgpt --ignore-not-found --timeout=5m &&
+kubectl -n argocd delete application gateway-routes networkdoctor-demo networkdoctor holmesgpt llm-gateway --ignore-not-found --timeout=5m &&
 kubectl -n argocd delete application monitoring --ignore-not-found --timeout=5m
 ```
 
