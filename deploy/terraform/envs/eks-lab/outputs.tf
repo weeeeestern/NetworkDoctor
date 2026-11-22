@@ -6,21 +6,12 @@ output "configure_kubectl" {
   value = "aws eks update-kubeconfig --region ${var.region} --name ${module.eks.cluster_name}"
 }
 
-output "route53_name_servers" {
-  description = "Set these 4 as 타사 네임서버 in My가비아 → 도메인 관리 → 네임서버 설정."
-  value       = aws_route53_zone.this.name_servers
+output "team_alb_dns_name" {
+  description = "DNS target for the team's existing HTTPS subdomain."
+  value       = aws_lb.team.dns_name
 }
 
-output "acm_certificate_arn" {
-  description = "Paste into k8s/gateway.yaml LoadBalancerConfiguration (defaultCertificate)."
-  value       = aws_acm_certificate.this.arn
-}
-
-output "app_url" {
-  value = "https://${var.domain}"
-}
-
-output "gateway_address_hint" {
-  description = "The public ALB is created from k8s Gateway resources, so its DNS lives in the Gateway status, not in Terraform state."
-  value       = "kubectl -n networkdoctor get gateway networkdoctor -o jsonpath='{.status.addresses[0].value}'"
+output "team_alb_target_group_arn" {
+  description = "Backend target group ARN for AWS CLI health checks."
+  value       = aws_lb_target_group.team_backend.arn
 }

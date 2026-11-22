@@ -1,0 +1,43 @@
+# Optional EKS notification route; not installed by Terraform or Argo CD.
+# First create Secret networkdoctor-slack in namespace networkdoctor, with key
+# webhook-url containing the real Slack Incoming Webhook URL. Keep it out of Git.
+# Then apply ONLY this file, after syncing monitoring and networkdoctor:
+#   kubectl apply -f deploy/terraform/k8s/alertmanager-slack.example.yaml
+# Alertmanager sends outbound HTTPS to Slack; an ALB is not needed.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: networkdoctor-slack
+  # The Operator adds namespace=networkdoctor to this route. Our chart stamps
+  # that label on every source=networkdoctor alert, including app/DNS incidents.
+  namespace: networkdoctor
+  labels:
+    app.kubernetes.io/part-of: networkdoctor
+spec:
+  route:
+    receiver: slack
+    matchers:
+      - name: source
+        value: networkdoctor
+        matchType: "="
+    groupBy: [alertname, namespace, service, node, rule_id]
+    groupWait: 30s
+    groupInterval: 2m
+    repeatInterval: 4h
+    # Keep the existing backend webhook route active alongside notifications.
+    continue: true
+  receivers:
+    - name: slack
+      slackConfigs:
+        - apiURL:
+            name: networkdoctor-slack
+            key: webhook-url
+          sendResolved: true
+          # The Incoming Webhook determines the channel; no channel override.
+          title: '[{{ .Status | toUpper }}] NetworkDoctor'
+          text: >-
+            {{ range .Alerts }}*{{ .Annotations.summary }}*
+            rule={{ .Labels.rule_id }} node={{ .Labels.node }}
+            {{ .Annotations.description }}
+
+            {{ end }}

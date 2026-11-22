@@ -10,7 +10,7 @@ provider "aws" {
   }
 }
 
-# Used only to install the AWS Load Balancer Controller chart. Token comes
+# Used to install Cilium and Argo CD. The token comes
 # from the local AWS credentials via `aws eks get-token`, so no static
 # kubeconfig is needed.
 provider "helm" {

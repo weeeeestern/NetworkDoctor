@@ -1,0 +1,35 @@
+# Grant only to trusted lab operators. Port forwarding reaches every Pod in this
+# namespace, including the host-network collector. The backend port also serves
+# actions that change incident state.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: networkdoctor-port-forward
+  namespace: networkdoctor
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    resourceNames: ["networkdoctor-backend"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    # Service port forwarding selects a Pod and can wait for one to appear.
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/portforward"]
+    # WebSocket uses get and also requires create on Kubernetes 1.35.
+    verbs: ["get", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: networkdoctor-port-forward
+  namespace: networkdoctor
+subjects:
+  - kind: Group
+    name: networkdoctor-lab-operators
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: networkdoctor-port-forward
+  apiGroup: rbac.authorization.k8s.io

@@ -3,6 +3,19 @@
 # release "monitoring" in the monitoring namespace. The networkdoctor Argo
 # Application in that same bootstrap deploys this chart with this file.
 
+global:
+  # Match the Terraform name variable when deploying under a custom name.
+  clusterName: nd-eks-lab
+
+agent:
+  # The t3a.medium AL2023 primary ENA uses the systemd slot name ens5.
+  # Verify the host's default-route interface on each worker and override
+  # agent.iface if the AMI or instance type changes the interface name.
+  iface: ens5
+  image:
+    # Published linux/amd64 image, main-c3d5a60.
+    digest: sha256:0c44c036b401188645bd841721a7c84f3d338ba8cc80222d712a69cbcb506229
+
 serviceMonitor:
   enabled: true
   # kube-prometheus-stack's Prometheus selects monitors/rules by this label.
@@ -24,15 +37,21 @@ grafanaDashboards:
   enabled: true
 
 alertmanagerConfig:
-  # Routes source="networkdoctor" alerts to the backend webhook; the stack's
-  # default alertmanagerConfigSelector picks this CR up as-is.
+  # The monitoring app selects this backend route and the optional Slack route.
   enabled: true
 
 backend:
+  service:
+    type: NodePort
+    # Match the team ALB target group in deploy/terraform/envs/eks-lab/alb.tf.
+    nodePort: 30080
+  image:
+    # Published linux/amd64 image, main-38da188.
+    digest: sha256:55d0788afb12641c07a7385dc6346f3dbd56daae9ee3854ab6cc4f9a5b17d7b1
   config:
     prometheusURL: http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090
     # holmesURL: fill in once HolmesGPT is deployed on EKS
-    #   (deploy/helm/holmesgpt), e.g. http://holmesgpt-holmes.networkdoctor.svc:80
+    #   (deploy/helm/holmesgpt), use http://holmesgpt-holmes.holmesgpt.svc:80
   persistence:
     # EBS via the aws-ebs-csi-driver addon (Terraform), same gp2 class the
     # bootstrap gives Prometheus. EKS 1.30+ no longer marks gp2 as the default

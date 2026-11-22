@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------
-# VPC — 3 AZs, private subnets for nodes/ALB, public for NAT (+ future
-# internet-facing LBs). Single NAT gateway to keep lab cost down.
+# VPC — private EKS and worker subnets, with the ALB and a single zonal NAT
+# gateway in public subnets. The lab accepts a shared egress dependency.
 # ---------------------------------------------------------------------------
 
 data "aws_availability_zones" "available" {
@@ -13,7 +13,7 @@ locals {
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "~> 5.0"
+  version = "5.21.0"
 
   name = var.name
   cidr = var.vpc_cidr
@@ -24,58 +24,83 @@ module "vpc" {
   # 10.80.48.0/24, 10.80.49.0/24, 10.80.50.0/24
   public_subnets = [for i in range(length(local.azs)) : cidrsubnet(var.vpc_cidr, 8, i + 48)]
 
-  enable_nat_gateway   = true
-  single_nat_gateway   = true
-  enable_dns_hostnames = true
-
-  # Subnet discovery tags for the AWS Load Balancer Controller.
-  public_subnet_tags = {
-    "kubernetes.io/role/elb" = 1
-  }
-  private_subnet_tags = {
-    "kubernetes.io/role/internal-elb" = 1
-  }
+  create_igw              = true
+  map_public_ip_on_launch = false
+  enable_nat_gateway      = true
+  single_nat_gateway      = true
+  enable_dns_hostnames    = true
 }
 
 # ---------------------------------------------------------------------------
-# EKS — managed node group, Pod Identity for addon/controller IAM.
+# EKS control plane. Worker and add-on ordering is defined separately.
 # ---------------------------------------------------------------------------
 
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "~> 20.31"
+  version = "20.37.2"
 
   cluster_name    = var.name
   cluster_version = var.cluster_version
 
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnets
+  vpc_id      = module.vpc.vpc_id
+  subnet_ids  = module.vpc.private_subnets
+  enable_irsa = true
 
-  # Lab cluster: kubectl from the laptop over the public endpoint.
-  cluster_endpoint_public_access           = true
-  enable_cluster_creator_admin_permissions = true
-
-  cluster_addons = {
-    coredns                = {}
-    kube-proxy             = {}
-    vpc-cni                = {}
-    eks-pod-identity-agent = {}
-    aws-ebs-csi-driver     = {} # backend PVC (pvc-backend.yaml) needs a block CSI
+  cluster_upgrade_policy = {
+    support_type = "STANDARD"
   }
 
-  eks_managed_node_groups = {
-    default = {
-      instance_types = var.node_instance_types
-      min_size       = var.node_min
-      desired_size   = var.node_desired
-      max_size       = var.node_max
+  # Workers use the private endpoint. Team kubectl and Terraform's Helm
+  # provider use the public endpoint from their allowlisted IPs.
+  cluster_endpoint_private_access          = true
+  cluster_endpoint_public_access           = true
+  cluster_endpoint_public_access_cidrs     = var.team_api_cidrs
+  enable_cluster_creator_admin_permissions = true
+
+  access_entries = {
+    for role_arn in var.team_role_arns : role_arn => {
+      principal_arn     = role_arn
+      kubernetes_groups = ["networkdoctor-lab-operators"]
     }
   }
 }
 
 # ---------------------------------------------------------------------------
-# Pod Identity roles (assumed via pods.eks.amazonaws.com, no OIDC/IRSA setup)
+# Dedicated IAM roles for the managed add-ons.
 # ---------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "vpc_cni_assume" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [module.eks.oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${module.eks.oidc_provider}:sub"
+      values   = ["system:serviceaccount:kube-system:aws-node"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${module.eks.oidc_provider}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "vpc_cni" {
+  name               = "${var.name}-vpc-cni"
+  assume_role_policy = data.aws_iam_policy_document.vpc_cni_assume.json
+}
+
+resource "aws_iam_role_policy_attachment" "vpc_cni" {
+  role       = aws_iam_role.vpc_cni.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+}
 
 data "aws_iam_policy_document" "pod_identity_assume" {
   statement {
@@ -98,12 +123,5 @@ resource "aws_iam_role" "ebs_csi" {
 
 resource "aws_iam_role_policy_attachment" "ebs_csi" {
   role       = aws_iam_role.ebs_csi.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
-}
-
-resource "aws_eks_pod_identity_association" "ebs_csi" {
-  cluster_name    = module.eks.cluster_name
-  namespace       = "kube-system"
-  service_account = "ebs-csi-controller-sa"
-  role_arn        = aws_iam_role.ebs_csi.arn
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEBSCSIDriverPolicyV2"
 }

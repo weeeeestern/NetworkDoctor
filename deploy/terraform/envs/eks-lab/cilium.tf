@@ -1,8 +1,8 @@
 # ---------------------------------------------------------------------------
 # Cilium in CNI chaining mode on top of the AWS VPC CNI.
 #
-# The VPC CNI keeps doing IPAM/routing (so pod IPs stay VPC-routable and the
-# ALB ip targets keep working); Cilium attaches eBPF programs on top for
+# The VPC CNI keeps doing IPAM/routing and pod egress SNAT.
+# Cilium attaches eBPF programs on top for
 # NetworkPolicy enforcement and Hubble observability. This is what Rule 8
 # (hubble_drop_*) and Rule 3's CT-map metrics (cilium_*) consume — same
 # metric setup as the on-prem lab (docs/deploy-onprem.md).
@@ -15,7 +15,7 @@ resource "helm_release" "cilium" {
   name       = "cilium"
   repository = "https://helm.cilium.io"
   chart      = "cilium"
-  version    = "1.18.2"
+  version    = "1.19.10" # Tested against Kubernetes 1.35 by Cilium.
   namespace  = "kube-system"
 
   values = [yamlencode({
@@ -37,5 +37,5 @@ resource "helm_release" "cilium" {
     }
   })]
 
-  depends_on = [module.eks]
+  depends_on = [aws_eks_addon.workers, aws_eks_addon.ebs_csi]
 }

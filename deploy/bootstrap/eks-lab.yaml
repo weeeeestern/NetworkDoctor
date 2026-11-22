@@ -1,12 +1,11 @@
 # EKS lab environment: which child Applications the root app creates.
 # Rendered by deploy/argocd/root-application-eks-lab.yaml. Unlike the on-prem
 # lab, the monitoring stack is also an Argo application here — Terraform
-# (deploy/terraform) stops at the platform layer (VPC/EKS/Cilium/ALB
-# controller/external-dns/Argo CD itself).
+# (deploy/terraform) stops at the platform layer (VPC/EKS/Cilium/Argo CD itself).
 #
 # Adding a chart under deploy/helm/ is not enough to deploy it; it must also
-# be listed here. Argo pulls from GitHub main, so changes must be merged
-# before a sync can see them.
+# be listed here. The root app passes its resolved Git commit to local child
+# charts; upstream Helm charts keep their explicit chart versions below.
 
 env: eks-lab
 project: default
@@ -39,6 +38,16 @@ applications:
     chart: kube-prometheus-stack
     targetRevision: 92.17.1
     values:
+      alertmanager:
+        alertmanagerSpec:
+          # Select both the backend route and the optional Slack route. Their
+          # namespace must match the namespace stamped on NetworkDoctor alerts.
+          alertmanagerConfigSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: networkdoctor
+          alertmanagerConfigNamespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: networkdoctor
       prometheus:
         prometheusSpec:
           retention: 7d
@@ -70,9 +79,13 @@ applications:
   # Cat Shop (podinfo) demo workload + fortio load
   - name: networkdoctor-demo
     namespace: networkdoctor-demo
+    valueFiles:
+      - values-eks-lab.yaml
 
-  # HolmesGPT RCA agent. Needs Secret holmes-llm (LLM_GATEWAY_KEY) in the
-  # namespace before the first sync; see deploy/helm/holmesgpt/README.md.
-  # EKS-specific values (gateway URL etc.) still to be written — sync last.
+  # Optional HolmesGPT RCA agent: leave unsynced until an EKS-reachable LLM
+  # gateway and Secret holmes-llm (LLM_GATEWAY_KEY) are configured. The EKS
+  # values below fill only the known Prometheus address; sync Holmes last.
   - name: holmesgpt
     namespace: holmesgpt
+    valueFiles:
+      - values-eks-lab.yaml
