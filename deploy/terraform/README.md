@@ -23,6 +23,9 @@ ALB, Cilium, Argo CD를 구성한다. Argo CD는 모니터링, NetworkDoctor, Ca
 
 ## 1. 배포 전 확인과 플랫폼 생성
 
+먼저 시연 주소의 ACM 인증서를 서울 리전에서 발급받는다.
+[HTTPS 연결 CLI 절차](team-https-cli.md#1-aws-cli로-서울-리전-acm-인증서-발급)
+
 AWS CLI SSO 프로필, Terraform 1.5 이상, EKS 1.35와 호환되는 kubectl
 1.34–1.36을 준비한다. 생성과 정리를 맡을 운영자 한 명을 정하고,
 적용에 사용하는 AWS 계정·리전·Terraform 작업 폴더와 상태 파일을 보관한다.
@@ -48,7 +51,7 @@ aws service-quotas get-service-quota --region ap-northeast-2 \
   각각 `/32`로 넣는다. 이 목록은 EKS API와 ALB에 함께 적용된다. 팀이 관리하는
   접속망의 주소를 사용한다.
 - `team_alb_certificate_arn`에 서울 리전에서 발급 완료된 ACM 인증서 ARN을 넣는다.
-  인증서는 팀이 관리하는 시연 서브도메인(예: `demo.example.com`)과 일치해야 한다.
+  인증서는 팀이 관리하는 시연 서브도메인(`demo.netdoc.cloud`)과 일치해야 한다.
   시연 DNS 레코드는 앱 배포 후 기존 DNS 서비스에서 추가한다.
 - 팀 운영자가 직접 접속해야 하면 `team_role_arns`에 IAM 콘솔의 전체 SSO 역할
   ARN(`arn:aws:iam::…:role/…/AWSReservedSSO_…`)을 넣는다.
@@ -108,37 +111,40 @@ kubectl debug "node/$worker_name" -it --image=busybox:1.37.0 -- ip -4 route show
 다이제스트를 기본으로 사용한다. 이미지를 바꿀 때는 해당 풀 권한과
 `agent.image.digest`·`backend.image.digest`를 함께 확인한다.
 
-아래 명령은 저장소 루트에서 실행한다. 배포할 변경을 GitHub에 커밋과 브랜치로
-올린 뒤, 루트 Application의 `spec.source.targetRevision`을 Argo CD가 읽을 수 있는
-그 커밋 SHA나 브랜치로 설정한다. 소스 저장소가 포크라면 루트 Application의
+아래 명령은 배포할 커밋을 체크아웃한 상태에서 저장소 루트에서 실행한다.
+해당 커밋이 GitHub에 올라 있는지 확인한다. 루트 Application에 그 커밋 SHA를
+지정하고 저장소 내부 자식 앱도 같은 커밋을 사용한다. 소스 저장소가 포크라면 루트 Application의
 `repoURL`과 `deploy/bootstrap/eks-lab.yaml`의 자식 공통 `source.repoURL`을
-둘 다 맞춘다. 저장소 내부 자식 앱은 루트가 해석한 커밋을 사용한다.
+둘 다 맞춘다.
 
 ```sh
 kubectl -n kube-system rollout status daemonset/eks-pod-identity-agent
 kubectl -n kube-system rollout status daemonset/aws-node
 kubectl -n kube-system rollout restart deployment/coredns
 kubectl -n kube-system rollout status deployment/coredns
-kubectl apply -f deploy/argocd/root-application-eks-lab.yaml
-kubectl -n argocd port-forward svc/argocd-server 8443:443
+deploy_revision=$(git rev-parse HEAD)
+kubectl patch --local -f deploy/argocd/root-application-eks-lab.yaml --type=merge \
+  -p "{\"spec\":{\"source\":{\"targetRevision\":\"$deploy_revision\"}}}" -o yaml |
+  kubectl apply -f -
 ```
 
-포트 전달을 유지하고 브라우저에서 `https://localhost:8443`을 연다. 처음 설치한
-Argo CD의 기본 사용자명은 `admin`이다. 별도 터미널에서 운영자가 초기 암호를
-확인한다.
+운영자 kubeconfig로 Argo CD 동기화를 요청한다. 아래 블록을 **한 줄씩 실행**하고,
+각 앱의 `SYNC STATUS`가 `Synced`인지 확인하고 넘어간다. 자식 앱은
+`HEALTH STATUS`도 `Healthy`인지 확인한다. `-w` 화면은 확인 후 Ctrl-C로
+빠져나온다. [kubectl을 사용한 Argo CD 동기화](https://argo-cd.readthedocs.io/en/stable/user-guide/sync-kubectl/)
 
 ```sh
-# 암호는 운영자 터미널에서만 확인하고 공유하지 않는다.
-kubectl -n argocd get secret argocd-initial-admin-secret \
-  -o jsonpath='{.data.password}' | base64 -d
+sync_operation='{"operation":{"sync":{"syncStrategy":{"hook":{}}}}}'
+kubectl -n argocd patch application networkdoctor-root --type=merge -p "$sync_operation"
+kubectl -n argocd get application networkdoctor-root -w
+kubectl -n argocd patch application monitoring --type=merge -p "$sync_operation"
+kubectl -n argocd get application monitoring -w
+kubectl -n argocd patch application networkdoctor --type=merge -p "$sync_operation"
+kubectl -n argocd get application networkdoctor -w
+kubectl -n argocd patch application networkdoctor-demo --type=merge -p "$sync_operation"
+kubectl -n argocd get application networkdoctor-demo -w
 ```
 
-자체 서명 인증서 때문에 접속하기 어렵다면 운영자 kubeconfig와 Argo CD CLI로
-`argocd admin dashboard -n argocd`를 실행해 로컬 대시보드를 열 수 있다.
-[Argo CD 로컬 대시보드](https://argo-cd.readthedocs.io/en/stable/operator-manual/core/#using)
-
-루트 앱을 동기화한 뒤 **monitoring → networkdoctor → networkdoctor-demo**
-순서로 적용한다. 각 앱의 `Synced`·`Healthy`를 확인하고 다음으로 넘어간다.
 monitoring의 Prometheus 리소스 유형이 등록되고 Prometheus PVC가 `Bound`인지,
 NetworkDoctor의 백엔드 PVC가 `Bound`이며 수집기 DaemonSet이 3/3인지 확인한다.
 
@@ -163,24 +169,8 @@ HolmesGPT를 쓸 때만 `holmesgpt` 네임스페이스를 먼저 만든다. EKS�
 
 ### 팀 HTTPS 접속
 
-NetworkDoctor가 동기화되면 EKS Helm 설정이 ALB가 연결할 백엔드 NodePort를
-준비한다. AWS 콘솔의 대상 그룹에서 `healthy` 상태를 확인한다. 저장소 루트에서
-아래 명령으로 ALB의 DNS 이름을 확인한다.
-
-```sh
-terraform -chdir=deploy/terraform/envs/eks-lab output -raw team_alb_dns_name
-```
-
-팀이 사용하는 기존 DNS 서비스에서 인증서에 포함된 시연 서브도메인의 CNAME을
-위 ALB 주소로 연결한다. 도메인의 네임서버 위임은 기존대로 유지한다. 허용된
-IP에서 `https://`로 그 서브도메인을 열고, `/healthz`의 정상 응답과 웹 화면을
-확인한다. 아래의 `POST` 확인은 `403`이 예상된다.
-
-```sh
-demo_hostname='demo.example.com'  # 실제 인증서에 포함된 시연 서브도메인
-curl -fsS "https://$demo_hostname/healthz"
-curl -sS -o /dev/null -w '%{http_code}\n' -X POST "https://$demo_hostname/healthz"
-```
+NetworkDoctor를 동기화한 뒤 AWS CLI로 ALB 상태를 확인하고
+`demo.netdoc.cloud`를 연결한다. [HTTPS 연결 CLI 절차](team-https-cli.md#3-alb-상태-확인-후-시연-주소-연결)
 
 ### 팀 운영자 SSO·포트 전달
 
