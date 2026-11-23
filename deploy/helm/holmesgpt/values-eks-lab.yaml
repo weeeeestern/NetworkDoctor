@@ -5,7 +5,7 @@ holmes:
 
   modelList:
     bedrock-luna: &bedrock-luna
-      model: bedrock/converse/global.openai.gpt-5.6-luna
+      model: bedrock/converse/global.openai.gpt-6-luna
       aws_region_name: ap-northeast-2
     # Helm keeps null model entries in the subchart, and Holmes rejects them.
     # Redirect inherited aliases to Bedrock and clear their gateway settings.

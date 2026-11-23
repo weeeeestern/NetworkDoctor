@@ -1,10 +1,10 @@
 # 서울 리전 Bedrock과 HolmesGPT 확인
 
-전시용 HolmesGPT는 AWS 서울 리전(`ap-northeast-2`)의 Bedrock API에
-온프렘 장애 분석에 지정한 OpenAI GPT-5.6 Luna의 Global 추론 프로필로 요청한다. 서울은 **호출을 보내는
-리전**이고 모델 처리는 다른 AWS 리전에서도 이뤄질 수 있다. EKS의
-HolmesGPT는 Pod Identity로 모델을 호출한다.
-[GPT-5.6 Luna 지원 리전](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-56-luna.html) · [Global 추론 프로필](https://docs.aws.amazon.com/bedrock/latest/userguide/global-cross-region-inference.html)
+전시용 HolmesGPT는 AWS 서울 리전(`ap-northeast-2`)의 Bedrock API에서
+OpenAI GPT-6 Luna Global 추론 프로필을 사용한다. 서울은 **요청을 보내는 리전**이며
+추론은 다른 AWS 리전에서 처리될 수 있다. EKS에서는 Pod Identity를 통해 모델
+호출 권한을 받는다.
+[GPT-6 Luna 지원 리전](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-luna.html) · [Global 추론 프로필](https://docs.aws.amazon.com/bedrock/latest/userguide/global-cross-region-inference.html)
 
 ## 1. AWS 계정과 모델 조회
 
@@ -16,7 +16,7 @@ AWS CLI v2의 최신 버전을 사용한다. 아래 명령은 같은 터미널�
 ```sh
 export AWS_PROFILE=networkdoctor
 bedrock_region=ap-northeast-2
-foundation_id=openai.gpt-5.6-luna
+foundation_id=openai.gpt-6-luna
 inference_profile_id="global.$foundation_id"
 
 aws sso login --use-device-code --no-browser
@@ -48,7 +48,7 @@ aws bedrock get-inference-profile --region "$bedrock_region" \
 [Service Quotas 조회](https://docs.aws.amazon.com/cli/latest/reference/service-quotas/list-service-quotas.html)
 
 ```sh
-bedrock_quota_query="Quotas[?contains(QuotaName, 'GPT-5.6 Luna') && contains(QuotaName, 'Global cross-region model inference')].[QuotaName,Value,QuotaCode]"
+bedrock_quota_query="Quotas[?contains(QuotaName, 'GPT-6 Luna') && contains(QuotaName, 'Global cross-region model inference')].[QuotaName,Value,QuotaCode]"
 aws service-quotas list-service-quotas --region "$bedrock_region" \
   --service-code bedrock --query "$bedrock_quota_query" --output table
 aws service-quotas list-aws-default-service-quotas --region "$bedrock_region" \
@@ -89,7 +89,7 @@ cluster_name=$(terraform -chdir=deploy/terraform/envs/eks-lab output -raw cluste
 aws eks list-pod-identity-associations --region "$bedrock_region" \
   --cluster-name "$cluster_name" --namespace holmesgpt --service-account holmes-bedrock
 kubectl -n holmesgpt exec deploy/holmesgpt-holmes -- python -c \
-  'from litellm.llms.bedrock.chat.converse_transformation import AmazonConverseConfig; assert "tools" in AmazonConverseConfig().get_supported_openai_params("global.openai.gpt-5.6-luna")'
+  'from litellm.llms.bedrock.chat.converse_transformation import AmazonConverseConfig; assert "tools" in AmazonConverseConfig().get_supported_openai_params("global.openai.gpt-6-luna")'
 kubectl -n holmesgpt port-forward svc/holmesgpt-holmes 18081:80
 ```
 

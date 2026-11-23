@@ -1,6 +1,6 @@
 locals {
   # Keep the profile in sync with deploy/helm/holmesgpt/values-eks-lab.yaml.
-  holmes_model_id            = "openai.gpt-5.6-luna"
+  holmes_model_id            = "openai.gpt-6-luna"
   holmes_profile_arn         = "arn:aws:bedrock:${var.region}:${data.aws_caller_identity.current.account_id}:inference-profile/global.${local.holmes_model_id}"
   holmes_regional_model_arn  = "arn:aws:bedrock:${var.region}::foundation-model/${local.holmes_model_id}"
   holmes_default_project_arn = "arn:aws:bedrock:${var.region}:${data.aws_caller_identity.current.account_id}:project/default"
