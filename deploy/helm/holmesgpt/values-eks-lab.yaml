@@ -1,8 +1,32 @@
-# Optional EKS Holmes setup. Configure an EKS-reachable LLM gateway and create
-# Secret holmes-llm in namespace holmesgpt before manually syncing this app.
-# The base modelList deliberately keeps its invalid gateway placeholder until
-# real gateway URLs are provided through deployment values; keys stay in Secret.
+# EKS HolmesGPT uses the holmesgpt/holmes-bedrock Pod Identity association.
 holmes:
+  customServiceAccountName: holmes-bedrock
+  extraEnvVarsSecrets: []
+
+  modelList:
+    bedrock-haiku: &bedrock-haiku
+      model: bedrock/converse/global.anthropic.claude-haiku-4-5-20251001-v1:0
+      aws_region_name: ap-northeast-2
+    # Helm keeps null model entries in the subchart, and Holmes rejects them.
+    # Redirect inherited aliases to Bedrock and clear their gateway settings.
+    gateway-sonnet: &bedrock-without-gateway
+      <<: *bedrock-haiku
+      api_base: null
+      api_key: null
+    gateway-haiku: *bedrock-without-gateway
+    gateway-luna: *bedrock-without-gateway
+
+  # This list replaces the base environment, including its gateway alias.
+  additionalEnvVars:
+    - name: MODEL
+      value: bedrock-haiku
+    - name: ROBUSTA_AI
+      value: "false"
+    - name: MAX_STEPS
+      value: "20"
+    - name: AWS_EC2_METADATA_DISABLED
+      value: "true"
+
   toolsets:
     prometheus/metrics:
       config:

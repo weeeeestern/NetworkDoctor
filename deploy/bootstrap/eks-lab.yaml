@@ -99,9 +99,8 @@ applications:
     valueFiles:
       - values-eks-lab.yaml
 
-  # Optional HolmesGPT RCA agent: leave unsynced until an EKS-reachable LLM
-  # gateway and Secret holmes-llm (LLM_GATEWAY_KEY) are configured. The EKS
-  # values below fill only the known Prometheus address; sync Holmes last.
+  # HolmesGPT is required for the RCA exhibit. Sync it manually after
+  # monitoring and verify model access through its Bedrock Pod Identity.
   - name: holmesgpt
     namespace: holmesgpt
     valueFiles:

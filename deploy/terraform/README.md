@@ -7,9 +7,9 @@
 - `envs/eks-lab` — VPC, EKS, NAT Gateway, Cilium, AWS Load Balancer Controller,
   external-dns, Gateway, Bedrock VPC 엔드포인트, Argo CD. 시연 기간에만 띄운다.
 
-Argo CD는 모니터링, NetworkDoctor, HTTPRoute(`gateway-routes`), Cat Shop을 배포한다.
-시연 전에는 **워커 3대에서 수집기가 실행되고, 같은 알림이 백엔드에 기록되며
-팀 Slack에 도착하는지** 확인한다. HolmesGPT는 선택 사항이다.
+Argo CD는 모니터링, HolmesGPT, NetworkDoctor, HTTPRoute(`gateway-routes`),
+Cat Shop을 배포한다. 시연 전에는 **워커 3대의 수집, 백엔드 Incident와 팀 Slack의
+같은 알림, HolmesGPT의 원인 분석**을 확인한다.
 
 - **EKS 1.35 표준 지원, Cilium 1.19.10, AL2023 x86-64 워커.** 두 가용 영역에
   노드 그룹을 하나씩 두고 온디맨드 `t3a.medium`을 `node_counts`(기본 2대·1대)로
@@ -29,9 +29,10 @@ Argo CD는 모니터링, NetworkDoctor, HTTPRoute(`gateway-routes`), Cat Shop을
   IP가 고정되어 있지 않기 때문이다. 요청마다 IAM 서명 토큰이 필요하고, 클러스터
   access entry에 등록된 역할(GitHub Actions 역할, `admin_role_arns`, `team_role_arns`)만
   권한을 받는다.
-- **Bedrock 호출은 VPC 안에서 끝난다.** `bedrock-runtime` 인터페이스 엔드포인트가
-  프라이빗 서브넷에 있고, `llm-gateway/llm-gateway` 서비스 계정이 Pod Identity로
-  Claude 모델 호출 권한을 받는다. LLM 게이트웨이 배포는 별도 단계다.
+- **HolmesGPT는 Bedrock에 연결한다.** 프라이빗 서브넷의 `bedrock-runtime`
+  인터페이스 엔드포인트로 서울 리전에 요청한다. 전시용 Claude Haiku 4.5 Global
+  프로필은 실제 추론을 다른 리전에서도 처리할 수 있다. `holmesgpt/holmes-bedrock`
+  서비스 계정에 전용 Pod Identity가 임시 자격증명을 제공한다.
 - Cilium은 VPC CNI 위에서 네트워크 정책과 Hubble 메트릭을 제공한다. VPC CNI는
   IRSA, EBS CSI·Load Balancer Controller·external-dns는 Pod Identity로 각자의
   IAM 역할을 사용한다. 일반 Pod의 EC2 메타데이터 접근에는
@@ -121,7 +122,9 @@ terraform output certificate_arn
 ## 1. 배포 전 확인과 플랫폼 생성
 
 `envs/dns`의 인증서가 `ISSUED`인지 먼저 확인한다. 랩 스택은 `domain`으로
-영역과 인증서를 조회하므로, 없으면 계획 단계에서 멈춘다.
+영역과 인증서를 조회하므로, 없으면 계획 단계에서 멈춘다. 같은 AWS 계정의
+서울 리전에서 Bedrock 모델 접근·쿼터를 조회하고 짧은 테스트 응답을 확인한 뒤
+적용한다. [Bedrock CLI 확인 절차](bedrock-cli.md)
 
 AWS CLI SSO 프로필, Terraform 1.5 이상, EKS 1.35와 호환되는 kubectl
 1.34–1.36을 준비한다. 생성과 정리를 맡을 운영자 한 명을 정하고,
@@ -245,6 +248,8 @@ kubectl -n argocd patch application networkdoctor-root --type=merge -p "$sync_op
 kubectl -n argocd get application networkdoctor-root -w
 kubectl -n argocd patch application monitoring --type=merge -p "$sync_operation"
 kubectl -n argocd get application monitoring -w
+kubectl -n argocd patch application holmesgpt --type=merge -p "$sync_operation"
+kubectl -n argocd get application holmesgpt -w
 kubectl -n argocd patch application networkdoctor --type=merge -p "$sync_operation"
 kubectl -n argocd get application networkdoctor -w
 kubectl -n argocd patch application gateway-routes --type=merge -p "$sync_operation"
@@ -269,13 +274,9 @@ Prometheus의 `http://localhost:19090/targets`에서 Cat Shop·Cilium·Hubble �
 `3`이어야 한다. `Pending` PVC가 있으면 `gp2` StorageClass와 EBS CSI 컨트롤러
 이벤트를 확인하고 시연은 원인이 해소된 후 진행한다.
 
-HolmesGPT를 쓸 때만 `holmesgpt` 네임스페이스를 먼저 만든다. EKS에서 접근할 수
-있는 게이트웨이 URL을 Holmes EKS Helm 값의 `holmes.modelList.<모델>.api_base`에
-지정하고 `holmes-llm` Secret의 `LLM_GATEWAY_KEY`를 등록한다. Holmes 앱을
-동기화해 준비된 뒤, NetworkDoctor EKS 값의 `backend.config.holmesURL`을
-`http://holmesgpt-holmes.holmesgpt.svc:80`으로 바꾸고 다시 동기화한다.
-클러스터 안의 LLM 게이트웨이는 `llm-gateway` 네임스페이스의 `llm-gateway`
-서비스 계정으로 띄운다. Terraform이 그 계정에 Bedrock Pod Identity를 미리 연결해 둔다.
+HolmesGPT가 `Healthy`로 표시되면 서비스 계정과 Pod Identity 연결을 확인하고
+실제 모델 응답을 시험한다. EKS에서 AWS 자격증명은 Pod Identity가 발급한다.
+[HolmesGPT 호출 확인](bedrock-cli.md)
 
 ### 팀 HTTPS 접속
 
@@ -361,8 +362,18 @@ unset nd_slack_webhook
 
 [EKS 알림 전달 리허설](k8s/eks-alert-smoke.md)을 실행한다. 4분 후 스스로 만료되는
 테스트 알림 하나로 **Prometheus 발화 → 백엔드 Incident → 팀 Slack의 발화·복구**를
-같은 실행 ID로 확인한다. HolmesGPT 연결은 이 시험의 조건이 아니다.
-장애 자체를 보여주는 시연과 수집기 상태 검증은 따로 진행한다.
+같은 실행 ID로 확인한다. AI 분석 시연은 실제 메트릭과 로그가 수집된 Incident를
+골라 운영자 포트 전달 세션에서 분석을 요청한다. 위의 `8080` 포트 전달을 유지한 채
+별도 터미널에서 실행한다.
+
+```sh
+incident_id='시연용 장애의 Incident ID'
+curl -fsS -X POST "http://127.0.0.1:8080/incidents/$incident_id/holmes"
+curl -fsS "http://127.0.0.1:8080/incidents/$incident_id" |
+  jq '{holmes_status, holmes_model, holmes_analysis, holmes_error}'
+```
+
+두 번째 명령을 반복해 `holmes_status`가 `done`이고 분석 내용이 표시되는지 확인한다.
 
 ## 4. 5일 뒤 정리
 

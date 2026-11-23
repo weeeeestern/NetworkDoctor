@@ -1,8 +1,7 @@
 # ---------------------------------------------------------------------------
-# Bedrock for the in-cluster LLM gateway (LiteLLM, namespace llm-gateway).
-# Calls stay inside the VPC through the bedrock-runtime interface endpoint;
-# the gateway's service account gets Bedrock access through Pod Identity, so
-# no provider API key reaches the cluster.
+# Bedrock interface endpoint for the EKS lab. HolmesGPT uses the dedicated
+# Pod Identity role in holmes-bedrock.tf. An in-cluster LLM gateway can also
+# use the existing llm-gateway role.
 # ---------------------------------------------------------------------------
 
 locals {
@@ -13,6 +12,7 @@ locals {
   # inference profiles (the profile and the models it routes to).
   bedrock_model_arns = [
     "arn:aws:bedrock:*::foundation-model/anthropic.*",
+    "arn:aws:bedrock:::foundation-model/${local.holmes_model_id}",
     "arn:aws:bedrock:*:${data.aws_caller_identity.current.account_id}:inference-profile/*",
   ]
 }
