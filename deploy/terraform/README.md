@@ -21,7 +21,7 @@ Argo CD는 모니터링, NetworkDoctor, HTTPRoute(`gateway-routes`), Cat Shop을
 - **팀은 Gateway API로 만든 ALB에서 HTTPS로 조회한다.** Terraform이 만든
   Gateway를 AWS Load Balancer Controller가 두 퍼블릭 서브넷의 ALB로 만들고,
   HTTPRoute마다 Pod IP를 대상으로 등록한다(NodePort 없음). external-dns가
-  `nd.<domain>`, `grafana.<domain>` 레코드를 Route53에 쓴다. **ALB 앞에 로그인이
+  `netdoc.cloud`, `grafana.netdoc.cloud` 레코드를 Route53에 쓴다. **ALB 앞에 로그인이
   없으므로 누구나 접속할 수 있다.** 그래서 NetworkDoctor 라우트는 `GET`/`HEAD`만
   전달하고(조회 전용), 변경 기능은 팀 운영자가 SSO로 접속한 뒤 로컬 포트 전달로 사용한다.
   Grafana는 로그인과 조회에 `POST`를 쓰므로 모든 메서드를 전달하고, Grafana 자체
@@ -92,9 +92,10 @@ terraform -chdir=deploy/terraform/envs/dns init -backend-config="bucket=$state_b
 
 `netdoc.cloud`는 가비아에 등록되어 있고 지금은 가비아 네임서버를 쓴다. 이 단계는
 **도메인 전체의 DNS를 Route53으로 옮긴다.** 가비아 DNS에 따로 쓰는 레코드가 있으면
-먼저 Route53 영역에 옮겨 둔다. 일부만 위임하려면 `domain`을 `lab.netdoc.cloud`처럼
-서브도메인으로 두고, 가비아에 그 호스트의 NS 레코드 4개만 추가한다. 두 스택의
-`domain`과 `deploy/helm/gateway-routes/values.yaml`의 `domain`은 같아야 한다.
+먼저 Route53 영역에 옮겨 둔다. 도메인 소유자인 팀원이 기존 레코드와 도메인
+연결을 확인한 뒤 네임서버를 변경한다. 두 스택의 `domain`과
+`deploy/helm/gateway-routes/values.yaml`의 `domain`은 `netdoc.cloud`로 맞춘다.
+[AWS의 기존 도메인 DNS 이전 절차](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/migrate-dns-domain-in-use.html)
 
 네임서버 변경은 전파에 수 시간이 걸릴 수 있으므로 **시연 하루 전까지** 마친다.
 영역을 먼저 만들고, 네임서버를 바꾼 뒤 인증서 검증까지 적용한다.
@@ -369,7 +370,11 @@ kill %1
 ### 팀 HTTPS 접속
 
 `gateway-routes`를 동기화하면 Load Balancer Controller가 ALB에 라우트를 붙이고
-external-dns가 Route53 레코드를 만든다. Gateway가 `Programmed`이고 라우트가
+external-dns가 Route53에 `netdoc.cloud`의 A 별칭을 만든다. 루트에 이미 A 레코드가
+있으면 전환 전 값을 별도로 기록하고, 도메인 소유자와 합의한 시점에 해당 레코드를
+비운 뒤 동기화한다. 다른 이름이나 메일 레코드는 그대로 둔다. 이전 설정으로
+시연 레코드를 생성한 클러스터라면 먼저 기존 external-dns로 이전 시연 레코드와
+소유권 TXT를 정리한다. 새 구성은 루트 별칭의 소유권 TXT를 같은 공개 영역에 둔다. Gateway가 `Programmed`이고 라우트가
 `Accepted`인지 확인한 뒤 접속한다. `GET`은 성공하고, `POST`는
 라우트에 일치하지 않아 ALB 기본 응답(4xx)을 받는다(NetworkDoctor 라우트는 `GET`/`HEAD`만 일치).
 
@@ -377,9 +382,9 @@ external-dns가 Route53 레코드를 만든다. Gateway가 `Programmed`이고 �
 kubectl -n gateway get gateway lab
 kubectl -n networkdoctor get httproute networkdoctor -o jsonpath='{.status.parents[0].conditions}'
 kubectl -n monitoring get httproute grafana
-dig +short nd.netdoc.cloud
-curl -4 -fsS --max-time 15 https://nd.netdoc.cloud/healthz
-curl -4 -sS --max-time 15 -o /dev/null -w '%{http_code}\n' -X POST https://nd.netdoc.cloud/healthz
+dig +short netdoc.cloud
+curl -4 -fsS --max-time 15 https://netdoc.cloud/healthz
+curl -4 -sS --max-time 15 -o /dev/null -w '%{http_code}\n' -X POST https://netdoc.cloud/healthz
 ```
 
 DNS가 아직 없으면 `kubectl -n kube-system logs deploy/external-dns`에서 레코드 생성을
@@ -400,7 +405,7 @@ kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-passwor
 `eks:DescribeCluster`가 필요하다. 배포 후 팀원 접속을 추가하는 경우 같은
 Terraform 상태에서 입력을 갱신하고 다시 계획·적용한다. Kubernetes 권한은
 `networkdoctor` 내 Pod 포트 전달을 허용한다. 백엔드 변경 기능과 호스트 네트워크
-수집기가 같은 범위에 있다. 조회만 하는 팀원은 `https://nd.netdoc.cloud`를 사용한다.
+수집기가 같은 범위에 있다. 조회만 하는 팀원은 `https://netdoc.cloud`를 사용한다.
 
 NetworkDoctor 네임스페이스가 생긴 뒤 운영자가 적용한다.
 
@@ -487,6 +492,7 @@ kubectl -n argocd delete application monitoring --ignore-not-found --timeout=5m
 
 monitoring 설치 전에 중단한 랩은 등록되지 않은 리소스 유형의 삭제만 건너뛴다.
 삭제가 실패하거나 시간 초과되면 남아 있는 Application과 리소스를 확인한 뒤 계속한다.
+Terraform을 종료하기 전에 external-dns가 시연 별칭을 삭제했는지 확인한다.
 
 4. **워커와 EBS CSI가 살아 있을 때** 남은 랩 전용 PVC/PV를 확인하고, 백업이
    끝난 claim만 삭제한다. `Retain` 정책이나 정리 실패로 볼륨이 남을 수 있다.
@@ -506,9 +512,10 @@ terraform -chdir=deploy/terraform/envs/eks-lab show lab-destroy.tfplan
 
 6. 종료 계획이 맞으면 적용한다. 서울 리전 콘솔에서 랩의 ALB, NAT Gateway, EIP,
    VPC 엔드포인트, EKS, EC2, EBS 삭제가 끝났는지 확인한다. 리소스가 삭제 중이면
-   완료될 때까지 확인한다. 3단계에서 `gateway-routes`를 지웠다면 external-dns가
-   `nd.`·`grafana.` 레코드를 이미 지웠다. Route53 영역에 남은 랩 레코드가 있으면
-   지운다(영역과 ACM 검증 레코드는 유지). 보존하기로 한 스냅샷이나 로그에는 비용이 이어질 수 있다.
+   완료될 때까지 확인한다. 3단계에서 `gateway-routes`를 지웠다면 external-dns가 `netdoc.cloud`·`grafana.netdoc.cloud`의 시연 별칭을 삭제한다.
+   ALB 별칭이 삭제된 것을 확인한 뒤 기존 루트 A 레코드가 있었다면 기록한 값으로
+   복원한다. Route53 영역과 ACM 검증 레코드는 유지한다. 보존하기로 한
+   스냅샷이나 로그에는 비용이 이어질 수 있다.
 
 ```sh
 terraform -chdir=deploy/terraform/envs/eks-lab apply lab-destroy.tfplan

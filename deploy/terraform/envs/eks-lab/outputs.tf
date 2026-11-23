@@ -9,7 +9,7 @@ output "configure_kubectl" {
 output "lab_urls" {
   description = "Hosts served by deploy/helm/gateway-routes once the Argo apps are synced."
   value = {
-    networkdoctor = "https://nd.${var.domain}"
+    networkdoctor = "https://${var.domain}"
     grafana       = "https://grafana.${var.domain}"
   }
 }
