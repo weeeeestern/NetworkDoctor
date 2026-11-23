@@ -61,10 +61,11 @@ backend:
     # HolmesGPT child app (deploy/helm/holmesgpt), Service holmesgpt-holmes:80.
     # Its gateway-* models go through the in-cluster LLM gateway to Bedrock.
     holmesURL: http://holmesgpt-holmes.holmesgpt.svc:80
-    holmesModel: gateway-sonnet
+    # Same model names as on-prem; the EKS gateway serves them from Bedrock.
+    holmesModel: gateway-luna
     # Same model under the gateway's -eval alias (no separate billing on EKS:
     # the gateway has no database).
-    evalHolmesModel: gateway-sonnet-eval
+    evalHolmesModel: gateway-luna-eval
     # Same investigation settings as the on-prem lab (values-onprem-lab.yaml).
     arch: derived
     correlationWindow: "0s"

@@ -6,12 +6,15 @@
 #
 # Helm replaces maps key by key, so only the fields that differ are listed.
 holmes:
+  # Same entry names and gateway aliases as values-onprem-lab.yaml; the EKS
+  # gateway maps them to Bedrock (GPT-6 Luna, Claude Haiku 4.5). Luna takes
+  # no temperature, as on-prem. The base gateway-sonnet entry stays unused
+  # (its placeholder URL): the EKS gateway has no claude-sonnet alias.
   modelList:
-    gateway-sonnet:
-      model: openai/claude-sonnet
+    gateway-luna:
+      model: openai/gpt-luna
       api_base: http://llm-gateway.llm-gateway.svc:4000/v1
       api_key: envRef:LLM_GATEWAY_KEY
-      temperature: 0
     gateway-haiku:
       model: openai/claude-haiku
       api_base: http://llm-gateway.llm-gateway.svc:4000/v1
@@ -20,11 +23,19 @@ holmes:
     # Evaluation runs (backend evalHolmesModel): same model under its own
     # gateway alias. The gateway has no spend records, so this keeps the
     # requests apart by name only.
-    gateway-sonnet-eval:
-      model: openai/claude-sonnet-eval
+    gateway-luna-eval:
+      model: openai/gpt-luna-eval
       api_base: http://llm-gateway.llm-gateway.svc:4000/v1
       api_key: envRef:LLM_GATEWAY_KEY
-      temperature: 0
+
+  # The list replaces the base one as a whole; only MODEL differs.
+  additionalEnvVars:
+    - name: MODEL
+      value: gateway-luna
+    - name: ROBUSTA_AI
+      value: "false"
+    - name: MAX_STEPS
+      value: "20"
 
   toolsets:
     prometheus/metrics:

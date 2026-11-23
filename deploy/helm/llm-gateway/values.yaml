@@ -15,27 +15,39 @@ masterKeySecret: llm-gateway
 aws:
   region: ap-northeast-2
 
-# Client-facing aliases → Bedrock models. Holmes asks for these names through
-# its gateway-* modelList entries (deploy/helm/holmesgpt/values-eks-lab.yaml).
-# global.* are cross-region inference profiles; enable model access in the
-# Bedrock console first and check the IDs with
-#   aws bedrock list-inference-profiles --region ap-northeast-2
+# Client-facing aliases → Bedrock models (converse API, global. cross-region
+# inference profiles). The aliases are the on-prem gateway's names, so Holmes
+# and the backend use the same model names in both labs. Model IDs must match
+# the Pod Identity policy in deploy/terraform/envs/eks-lab/bedrock.tf.
 # The -eval alias is the same model under its own name. Without a database
 # the gateway keeps no spend records, so this separates requests by name
 # only; it does not split the bill.
+#
+# modelInfo: LiteLLM v1.103.0's bundled model map predates GPT-6 Luna on
+# Bedrock, and the gateway cannot download a newer one (no internet egress).
+# Without these flags LiteLLM treats Luna as an unknown model and, with
+# drop_params, may silently drop the tools Holmes sends.
 models:
-  - name: claude-sonnet
-    bedrockModel: global.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - name: claude-sonnet-eval
-    bedrockModel: global.anthropic.claude-sonnet-4-5-20250929-v1:0
+  - name: gpt-luna
+    bedrockModel: converse/global.openai.gpt-6-luna
+    modelInfo:
+      mode: chat
+      supports_function_calling: true
+      supports_tool_choice: true
+  - name: gpt-luna-eval
+    bedrockModel: converse/global.openai.gpt-6-luna
+    modelInfo:
+      mode: chat
+      supports_function_calling: true
+      supports_tool_choice: true
   - name: claude-haiku
-    bedrockModel: global.anthropic.claude-haiku-4-5-20251001-v1:0
+    bedrockModel: converse/global.anthropic.claude-haiku-4-5-20251001-v1:0
 
 # When a model still fails after num_retries (throttling, outage), answer with
 # the listed models instead, so a demo RCA degrades rather than fails.
-# Not for claude-sonnet-eval: evaluation runs must stay on one model.
+# Not for gpt-luna-eval: evaluation runs must stay on one model.
 fallbacks:
-  claude-sonnet: [claude-haiku]
+  gpt-luna: [claude-haiku]
 
 port: 4000
 

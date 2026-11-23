@@ -13,6 +13,10 @@ data:
         litellm_params:
           model: bedrock/{{ .bedrockModel }}
           aws_region_name: {{ $.Values.aws.region }}
+        {{- with .modelInfo }}
+        model_info:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
     {{- end }}
 
     litellm_settings:

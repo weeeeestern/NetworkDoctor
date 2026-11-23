@@ -31,6 +31,11 @@ spec:
                   key: LITELLM_MASTER_KEY
             - name: AWS_REGION
               value: {{ .Values.aws.region }}
+            # Credentials come only from Pod Identity. Without this, a missing
+            # association makes boto3 try IMDS, which the network policy drops
+            # (and Rule 8 would report).
+            - name: AWS_EC2_METADATA_DISABLED
+              value: "true"
             # Use the bundled model price map instead of downloading it from
             # GitHub at start; the network policy allows no internet egress.
             - name: LITELLM_LOCAL_MODEL_COST_MAP

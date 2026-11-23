@@ -149,13 +149,15 @@ aws acm list-certificates --region ap-northeast-2 \
 
 `availability_zones`의 두 영역이 `t3a.medium` 제공 목록에 있어야 한다.
 
-LLM 분석에는 Bedrock의 Claude 모델이 필요하다. 계정 관리자가 AWS 콘솔에서 두 가지를
-확인한다. **시연 며칠 전에** 한다(쿼터 증가는 승인에 며칠 걸릴 수 있다).
+LLM 분석에는 Bedrock의 GPT-6 Luna(기본, 온프렘과 같은 모델)와 Claude Haiku 4.5
+(Luna 실패 시 대체)가 필요하다. 계정 관리자가 AWS 콘솔에서 두 가지를 확인한다.
+**시연 며칠 전에** 한다(쿼터 증가는 승인에 며칠 걸릴 수 있다).
 
-1. **모델 액세스 — 써도 되는가.** Anthropic 모델은 계정에서 처음 쓸 때 사용 사례
-   양식을 한 번 제출해야 한다(단체 이름, 용도). Bedrock 콘솔(서울 리전) → 모델
-   카탈로그 → Claude Sonnet 4.5와 Claude Haiku 4.5에서 액세스를 요청한다. 보통 바로
-   승인된다. 콘솔 플레이그라운드에서 답이 오면 된 것이다. 액세스가 없으면 게이트웨이가
+1. **모델 액세스 — 써도 되는가.** 모델을 계정에서 처음 호출할 때 Bedrock이 AWS
+   Marketplace 구독을 시작할 수 있으므로, 계정 소유자가 두 모델의 이용약관과 결제
+   수단을 먼저 확인한다. Anthropic 모델(Haiku)은 처음 쓸 때 사용 사례 양식을 한 번
+   제출한다(단체 이름, 용도). Bedrock 콘솔(서울 리전) → 모델 카탈로그에서 두 모델의
+   액세스를 확인하고, 플레이그라운드에서 답이 오면 된 것이다. 액세스가 없으면 게이트웨이가
    `AccessDeniedException`을 받는다. 게이트웨이 모델 ID(`deploy/helm/llm-gateway/values.yaml`의
    `models`)가 이 계정에서 호출 가능한 추론 프로파일인지도 확인한다.
 
@@ -175,14 +177,18 @@ LLM 분석에는 Bedrock의 Claude 모델이 필요하다. 계정 관리자가 A
 
    ```sh
    aws service-quotas list-service-quotas --service-code bedrock --region ap-northeast-2 \
-     --query "Quotas[?contains(QuotaName, 'Sonnet 4.5') || contains(QuotaName, 'Haiku 4.5')].[QuotaName,Value,Adjustable]" \
+     --query "Quotas[?(contains(QuotaName, 'GPT-6 Luna') || contains(QuotaName, 'Claude Haiku 4.5')) && contains(QuotaName, 'Global cross-region model inference')].[QuotaName,Value,Adjustable]" \
      --output table
    ```
 
-   Sonnet의 Global cross-region TPM이 수십만 이상이면 분석을 하나씩 돌리는 랩(backend
+   결과가 비어 있으면 계정 적용 값이 아직 없다는 뜻일 수 있다. 같은 `--query`로
+   `list-aws-default-service-quotas`를 실행하면 AWS 기본값을 볼 수 있다.
+
+   Luna의 Global cross-region TPM이 수십만 이상이면 분석을 하나씩 돌리는 랩(backend
    `workers: 1`)에 충분하다. 수만 이하이거나 0이면 Service Quotas 콘솔 → Amazon Bedrock에서
    해당 항목을 골라 계정 수준 증가를 요청한다. `Adjustable`이 `False`인 항목은 AWS Support
-   케이스로 요청한다. Sonnet 4.5 기준 분석 한 번에 $1 안팎이 들 수 있다.
+   케이스로 요청한다. 분석 한 번에 수십만 토큰을 쓸 수 있으므로 모델 단가로 비용을
+   미리 가늠한다.
 
 서울 리전의 **Running On-Demand Standard instances**에 기존 사용분과 용량 예약을
 제외하고도 **6 vCPU**가 남아 있어야 한다. 콘솔의 Service Quotas에서 적용 한도와
@@ -332,7 +338,21 @@ sleep 3  # port-forward가 포트를 열 때까지
 gateway_key=$(kubectl -n llm-gateway get secret llm-gateway -o jsonpath='{.data.LITELLM_MASTER_KEY}' | base64 -d)
 curl -sS http://localhost:4000/v1/chat/completions -H "Authorization: Bearer $gateway_key" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"claude-haiku","messages":[{"role":"user","content":"ping"}],"max_tokens":16}'
+  -d '{"model":"gpt-luna","messages":[{"role":"user","content":"ping"}],"max_tokens":64}'
+```
+
+Holmes는 도구 호출(tools)로 분석한다. 게이트웨이의 LiteLLM은 Luna를 모델 정보
+파일로 알지 못해 설정의 `model_info`로 도구 지원을 알려 준다. 아래 요청의 응답에
+`tool_calls`가 있으면 도구 호출이 Bedrock까지 전달된다. 없고 일반 답변만 오면 도구가
+버려진 것이므로 Holmes 분석이 동작하지 않는다.
+
+```sh
+curl -sS http://localhost:4000/v1/chat/completions -H "Authorization: Bearer $gateway_key" \
+  -H 'Content-Type: application/json' -d '{"model":"gpt-luna","max_tokens":256,
+  "messages":[{"role":"user","content":"What time is it in Seoul? Use the tool."}],
+  "tools":[{"type":"function","function":{"name":"get_time","description":"Current time for a city",
+    "parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]}' |
+  jq '.choices[0].message.tool_calls'
 kill %1
 ```
 

@@ -5,7 +5,7 @@ Wrapper around the official `holmes` chart 0.38.1 (vendored in `charts/`).
 ```text
 Holmes pod (ns holmesgpt)
   init: fetch-skills  git fetch SKILLS_REF, sparse skills/  -> emptyDir -> /etc/holmes/networkdoctor-skills
-  env:  LLM_GATEWAY_KEY (Secret holmes-llm), MODEL=gateway-sonnet
+  env:  LLM_GATEWAY_KEY (Secret holmes-llm), MODEL=gateway-sonnet (EKS: gateway-luna)
   LLM:  on-prem http://192.168.0.21:4000/v1   (LiteLLM gateway VM, deploy/llm-gateway/)
         EKS     http://llm-gateway.llm-gateway.svc:4000/v1   (deploy/helm/llm-gateway → Bedrock)
   metrics: prometheus-stack-kube-prom-prometheus.monitoring.svc:9090
@@ -28,10 +28,10 @@ Without it the pod stays in `CreateContainerConfigError`.
 
 | Holmes model name | Gateway alias | On-prem provider model | EKS (Bedrock) |
 | --- | --- | --- | --- |
-| `gateway-sonnet` (default) | `claude-sonnet` | Anthropic `claude-sonnet-5-5` | `global.anthropic.claude-sonnet-4-5-20250929-v1:0` |
+| `gateway-sonnet` (on-prem default) | `claude-sonnet` | Anthropic `claude-sonnet-5-5` | — |
 | `gateway-haiku` | `claude-haiku` | Anthropic `claude-haiku-4-5-20251001` | `global.anthropic.claude-haiku-4-5-20251001-v1:0` |
-| `gateway-luna` (on-prem only) | `gpt-luna` | OpenAI `gpt-5.6-luna` | — |
-| `gateway-sonnet-eval` (EKS only) | `claude-sonnet-eval` | — | same as `gateway-sonnet` |
+| `gateway-luna` (EKS default) | `gpt-luna` | OpenAI `gpt-5.6-luna` | `global.openai.gpt-6-luna` (falls back to Haiku) |
+| `gateway-luna-eval` | `gpt-luna-eval` | OpenAI `gpt-5.6-luna` | same as `gateway-luna`, no fallback |
 
 The model list is per environment (`values-onprem-lab.yaml`, `values-eks-lab.yaml`).
 Pick one per request with `"model": "gateway-sonnet"` in the `/api/chat` body,
