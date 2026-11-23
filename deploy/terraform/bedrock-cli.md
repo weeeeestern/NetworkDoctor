@@ -1,10 +1,11 @@
 # 서울 리전 Bedrock과 HolmesGPT 확인
 
 전시용 HolmesGPT는 AWS 서울 리전(`ap-northeast-2`)의 Bedrock API에서
-OpenAI GPT-6 Luna Global 추론 프로필을 사용한다. 서울은 **요청을 보내는 리전**이며
-추론은 다른 AWS 리전에서 처리될 수 있다. EKS에서는 Pod Identity를 통해 모델
-호출 권한을 받는다.
-[GPT-6 Luna 지원 리전](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-luna.html) · [Global 추론 프로필](https://docs.aws.amazon.com/bedrock/latest/userguide/global-cross-region-inference.html)
+기본 모델인 GPT-6 Luna(`bedrock-luna`)와 선택 모델인 Claude Haiku 4.5
+(`bedrock-haiku`)의 Global 추론 프로필을 사용할 수 있다. 서울은 **요청을 보내는
+리전**이며 추론은 다른 AWS 리전에서 처리될 수 있다. EKS에서는 Pod Identity를
+통해 모델 호출 권한을 받는다.
+[GPT-6 Luna 지원 리전](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-luna.html) · [Claude Haiku 4.5 지원 리전](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-haiku-4-5.html)
 
 ## 1. AWS 계정과 모델 조회
 
@@ -31,8 +32,9 @@ aws bedrock get-inference-profile --region "$bedrock_region" \
 
 모델 조회의 `authorizationStatus`와 `agreementAvailability`로 권한과 계약
 상태를 각각 확인한다. 프로필 상태는 `ACTIVE`가 예상된다. 서울에서 모델을
-호출할 때는 `global.`이 붙은 프로필 ID를 사용한다. 조회 결과와 별도로
-3단계에서 실제 응답을 확인한다.
+호출할 때는 `global.`이 붙은 프로필 ID를 사용한다. Haiku도 확인하려면
+`foundation_id=anthropic.claude-haiku-4-5-20251001-v1:0`으로 바꾸고
+`inference_profile_id`를 다시 설정한 뒤 모델 조회와 3단계 호출을 반복한다.
 [모델 액세스 상태](https://docs.aws.amazon.com/cli/latest/reference/bedrock/get-foundation-model-availability.html) · [추론 프로필 상태](https://docs.aws.amazon.com/cli/latest/reference/bedrock/get-inference-profile.html)
 
 ## 2. 모델 활성화와 쿼터 확인
@@ -40,6 +42,7 @@ aws bedrock get-inference-profile --region "$bedrock_region" \
 이 AWS 계정에서 모델을 처음 호출할 때 Bedrock이 AWS Marketplace 구독을
 시작할 수 있다. 최초 호출 전 계정 소유자가 해당 모델의 이용약관과 결제
 수단을 확인하고, 모델 호출과 Marketplace 활성화 권한을 가진 SSO 역할을 사용한다.
+Claude Haiku를 처음 쓰는 계정이라면 Anthropic 이용 목적도 먼저 제출한다.
 [AWS 모델 활성화](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html)
 
 같은 서울 리전에서 분당 요청 수와 토큰 수의 계정 적용 한도를 확인한다.
@@ -48,7 +51,7 @@ aws bedrock get-inference-profile --region "$bedrock_region" \
 [Service Quotas 조회](https://docs.aws.amazon.com/cli/latest/reference/service-quotas/list-service-quotas.html)
 
 ```sh
-bedrock_quota_query="Quotas[?contains(QuotaName, 'GPT-6 Luna') && contains(QuotaName, 'Global cross-region model inference')].[QuotaName,Value,QuotaCode]"
+bedrock_quota_query="Quotas[?(contains(QuotaName, 'GPT-6 Luna') || contains(QuotaName, 'Claude Haiku 4.5')) && contains(QuotaName, 'Global cross-region model inference')].[QuotaName,Value,QuotaCode]"
 aws service-quotas list-service-quotas --region "$bedrock_region" \
   --service-code bedrock --query "$bedrock_quota_query" --output table
 aws service-quotas list-aws-default-service-quotas --region "$bedrock_region" \
@@ -89,22 +92,30 @@ cluster_name=$(terraform -chdir=deploy/terraform/envs/eks-lab output -raw cluste
 aws eks list-pod-identity-associations --region "$bedrock_region" \
   --cluster-name "$cluster_name" --namespace holmesgpt --service-account holmes-bedrock
 kubectl -n holmesgpt exec deploy/holmesgpt-holmes -- python -c \
-  'from litellm.llms.bedrock.chat.converse_transformation import AmazonConverseConfig; assert "tools" in AmazonConverseConfig().get_supported_openai_params("global.openai.gpt-6-luna")'
+  'from litellm.llms.bedrock.chat.converse_transformation import AmazonConverseConfig; assert all("tools" in AmazonConverseConfig().get_supported_openai_params(model) for model in ("global.openai.gpt-6-luna", "global.anthropic.claude-haiku-4-5-20251001-v1:0"))'
 kubectl -n holmesgpt port-forward svc/holmesgpt-holmes 18081:80
 ```
 
 배포와 AWS 연결 모두 `holmes-bedrock` 서비스 계정을 가리키는지 확인한다.
-두 번째 터미널에서 HolmesGPT API가 모델 응답을 반환하는지 확인한다.
+두 번째 터미널에서 HolmesGPT API가 모델 응답을 반환하는지 확인한다. Haiku를
+확인할 때는 `holmes_model=bedrock-haiku`로 바꿔 실행한다.
 
 ```sh
+holmes_model=bedrock-luna
 curl -fsS --max-time 120 http://127.0.0.1:18081/api/chat \
   -H 'Content-Type: application/json' \
-  --data '{"ask":"Reply with exactly BEDROCK_OK without calling tools.","model":"bedrock-luna"}' |
+  --data "$(jq -n --arg model "$holmes_model" \
+    '{ask:"Reply with exactly BEDROCK_OK without calling tools.", model:$model}')" |
   jq -er '.analysis | select(type == "string" and contains("BEDROCK_OK"))'
 ```
 
-응답에 `BEDROCK_OK`가 포함되면 HolmesGPT Pod에서 모델을 호출할 수 있다. CLI
-호출만 성공하고 이 요청이 실패한다면 HolmesGPT 로그와 ServiceAccount의
+응답에 `BEDROCK_OK`가 포함되면 HolmesGPT Pod에서 선택한 모델을 호출할 수 있다.
+NetworkDoctor 장애 분석의 기본 모델을 Haiku로 바꾸려면
+`deploy/helm/networkdoctor/values-eks-lab.yaml`의 `backend.config.holmesModel`을
+`bedrock-haiku`로 설정한다. 변경을 Argo CD가 추적하는 리비전에 반영한 뒤
+`networkdoctor` 앱을 동기화한다.
+
+CLI 호출만 성공하고 이 요청이 실패한다면 HolmesGPT 로그와 ServiceAccount의
 Pod Identity 연결을 확인한다. 전시 전에 실제 시연용 Incident에서 HolmesGPT가 도구로 증거를 조회하고
 분석 결과를 백엔드에 기록하는지도 확인한다. [Slack 전달 시험](k8s/eks-alert-smoke.md)은
 알림 전달 경로를 확인하는 별도 시험이다.

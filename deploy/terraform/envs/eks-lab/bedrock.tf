@@ -46,11 +46,36 @@ data "aws_iam_policy_document" "bedrock_endpoint" {
       "bedrock:InvokeModel",
       "bedrock:InvokeModelWithResponseStream",
     ]
+    # Preserve the existing endpoint resources for other callers.
     resources = concat(local.bedrock_model_arns, [
       local.holmes_default_project_arn,
-      local.holmes_regional_model_arn,
-      local.holmes_global_model_arn,
+      local.holmes_model_arns.luna.regional,
+      local.holmes_model_arns.luna.regionless,
     ])
+
+    condition {
+      test     = "ArnNotEquals"
+      variable = "aws:PrincipalArn"
+      values   = [aws_iam_role.holmes_bedrock.arn]
+    }
+  }
+
+  statement {
+    principals {
+      type        = "AWS"
+      identifiers = ["*"]
+    }
+    actions = local.holmes_invoke_actions
+    resources = concat([local.holmes_default_project_arn], flatten([
+      for model in local.holmes_model_arns : [model.profile, model.regional, model.regionless]
+    ]))
+
+    # The role policy checks each model and inference profile pairing.
+    condition {
+      test     = "ArnEquals"
+      variable = "aws:PrincipalArn"
+      values   = [aws_iam_role.holmes_bedrock.arn]
+    }
   }
 }
 

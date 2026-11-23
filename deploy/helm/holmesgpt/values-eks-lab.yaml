@@ -7,6 +7,9 @@ holmes:
     bedrock-luna: &bedrock-luna
       model: bedrock/converse/global.openai.gpt-6-luna
       aws_region_name: ap-northeast-2
+    bedrock-haiku: &bedrock-haiku
+      model: bedrock/converse/global.anthropic.claude-haiku-4-5-20251001-v1:0
+      aws_region_name: ap-northeast-2
     # Helm keeps null model entries in the subchart, and Holmes rejects them.
     # Redirect inherited aliases to Bedrock and clear their gateway settings.
     gateway-sonnet: &bedrock-without-gateway
@@ -14,7 +17,11 @@ holmes:
       api_base: null
       api_key: null
       temperature: null
-    gateway-haiku: *bedrock-without-gateway
+    gateway-haiku:
+      <<: *bedrock-haiku
+      api_base: null
+      api_key: null
+      temperature: null
     gateway-luna: *bedrock-without-gateway
 
   # This list replaces the base environment, including its gateway alias.

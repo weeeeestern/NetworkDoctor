@@ -1,10 +1,18 @@
 locals {
-  # Keep the profile in sync with deploy/helm/holmesgpt/values-eks-lab.yaml.
-  holmes_model_id            = "openai.gpt-6-luna"
-  holmes_profile_arn         = "arn:aws:bedrock:${var.region}:${data.aws_caller_identity.current.account_id}:inference-profile/global.${local.holmes_model_id}"
-  holmes_regional_model_arn  = "arn:aws:bedrock:${var.region}::foundation-model/${local.holmes_model_id}"
+  # Keep these model IDs in sync with deploy/helm/holmesgpt/values-eks-lab.yaml.
+  holmes_model_ids = {
+    luna  = "openai.gpt-6-luna"
+    haiku = "anthropic.claude-haiku-4-5-20251001-v1:0"
+  }
+  holmes_model_arns = {
+    for name, model_id in local.holmes_model_ids : name => {
+      profile    = "arn:aws:bedrock:${var.region}:${data.aws_caller_identity.current.account_id}:inference-profile/global.${model_id}"
+      regional   = "arn:aws:bedrock:${var.region}::foundation-model/${model_id}"
+      regionless = "arn:aws:bedrock:::foundation-model/${model_id}"
+    }
+  }
   holmes_default_project_arn = "arn:aws:bedrock:${var.region}:${data.aws_caller_identity.current.account_id}:project/default"
-  holmes_global_model_arn    = "arn:aws:bedrock:::foundation-model/${local.holmes_model_id}"
+  holmes_invoke_actions      = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
 }
 
 data "aws_iam_policy_document" "holmes_assume" {
@@ -43,11 +51,11 @@ resource "aws_iam_role" "holmes_bedrock" {
 
 # Global inference authorizes the source profile, regional model, and
 # regionless model separately. The source statement also covers the default
-# project used by Converse. Only allow the underlying model via this profile.
+# project used by Luna. Tie each underlying model to its own profile.
 data "aws_iam_policy_document" "holmes_bedrock" {
   statement {
-    actions   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
-    resources = [local.holmes_profile_arn, local.holmes_default_project_arn]
+    actions   = local.holmes_invoke_actions
+    resources = concat([local.holmes_default_project_arn], [for model in local.holmes_model_arns : model.profile])
 
     condition {
       test     = "StringEquals"
@@ -56,37 +64,45 @@ data "aws_iam_policy_document" "holmes_bedrock" {
     }
   }
 
-  statement {
-    actions   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
-    resources = [local.holmes_regional_model_arn]
+  dynamic "statement" {
+    for_each = local.holmes_model_arns
 
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.region]
-    }
+    content {
+      actions   = local.holmes_invoke_actions
+      resources = [statement.value.regional]
 
-    condition {
-      test     = "StringEquals"
-      variable = "bedrock:InferenceProfileArn"
-      values   = [local.holmes_profile_arn]
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestedRegion"
+        values   = [var.region]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "bedrock:InferenceProfileArn"
+        values   = [statement.value.profile]
+      }
     }
   }
 
-  statement {
-    actions   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
-    resources = [local.holmes_global_model_arn]
+  dynamic "statement" {
+    for_each = local.holmes_model_arns
 
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = ["unspecified"]
-    }
+    content {
+      actions   = local.holmes_invoke_actions
+      resources = [statement.value.regionless]
 
-    condition {
-      test     = "StringEquals"
-      variable = "bedrock:InferenceProfileArn"
-      values   = [local.holmes_profile_arn]
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestedRegion"
+        values   = ["unspecified"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "bedrock:InferenceProfileArn"
+        values   = [statement.value.profile]
+      }
     }
   }
 }

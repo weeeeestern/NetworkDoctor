@@ -30,8 +30,9 @@ Cat Shop을 배포한다. 시연 전에는 **워커 3대의 수집, 백엔드 In
   access entry에 등록된 역할(GitHub Actions 역할, `admin_role_arns`, `team_role_arns`)만
   권한을 받는다.
 - **HolmesGPT는 Bedrock에 연결한다.** 프라이빗 서브넷의 `bedrock-runtime`
-  인터페이스 엔드포인트로 서울 리전에 요청한다. 전시용 GPT-6 Luna Global 프로필은
-  실제 추론을 다른 리전에서도 처리할 수 있다. `holmesgpt/holmes-bedrock`
+  인터페이스 엔드포인트로 서울 리전에 요청한다. 기본은 GPT-6 Luna이며, Claude
+  Haiku 4.5도 선택할 수 있다. 두 Global 프로필은 추론을 다른 리전에서 처리할 수
+  있다. `holmesgpt/holmes-bedrock`
   서비스 계정에 전용 Pod Identity가 임시 자격증명을 제공한다.
 - Cilium은 VPC CNI 위에서 네트워크 정책과 Hubble 메트릭을 제공한다. VPC CNI는
   IRSA, EBS CSI·Load Balancer Controller·external-dns는 Pod Identity로 각자의
