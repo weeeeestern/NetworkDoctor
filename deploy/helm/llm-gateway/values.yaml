@@ -1,0 +1,76 @@
+# Same LiteLLM release as the on-prem gateway VM (deploy/llm-gateway).
+image:
+  repository: ghcr.io/berriai/litellm
+  tag: v1.103.0
+  pullPolicy: IfNotPresent
+
+# Must match the Pod Identity association in
+# deploy/terraform/envs/eks-lab/bedrock.tf (namespace llm-gateway).
+serviceAccount:
+  name: llm-gateway
+
+# Secret with LITELLM_MASTER_KEY (deploy/terraform/envs/eks-lab/llm.tf).
+masterKeySecret: llm-gateway
+
+aws:
+  region: ap-northeast-2
+
+# Client-facing aliases → Bedrock models (converse API, global. cross-region
+# inference profiles). The aliases are the on-prem gateway's names, so Holmes
+# and the backend use the same model names in both labs. Model IDs must match
+# the Pod Identity policy in deploy/terraform/envs/eks-lab/bedrock.tf.
+# The -eval alias is the same model under its own name. Without a database
+# the gateway keeps no spend records, so this separates requests by name
+# only; it does not split the bill.
+#
+# modelInfo: LiteLLM v1.103.0's bundled model map predates GPT-6 Luna on
+# Bedrock, and the gateway cannot download a newer one (no internet egress).
+# Without these flags LiteLLM treats Luna as an unknown model and, with
+# drop_params, may silently drop the tools Holmes sends.
+models:
+  - name: gpt-luna
+    bedrockModel: converse/global.openai.gpt-6-luna
+    modelInfo:
+      mode: chat
+      supports_function_calling: true
+      supports_tool_choice: true
+  - name: gpt-luna-eval
+    bedrockModel: converse/global.openai.gpt-6-luna
+    modelInfo:
+      mode: chat
+      supports_function_calling: true
+      supports_tool_choice: true
+  - name: claude-haiku
+    bedrockModel: converse/global.anthropic.claude-haiku-4-5-20251001-v1:0
+
+# When a model still fails after num_retries (throttling, outage), answer with
+# the listed models instead, so a demo RCA degrades rather than fails.
+# Not for gpt-luna-eval: evaluation runs must stay on one model.
+fallbacks:
+  gpt-luna: [claude-haiku]
+
+port: 4000
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    memory: 1Gi
+
+# CiliumNetworkPolicy: only HolmesGPT may call the gateway, and the gateway
+# may only reach DNS, the node's Pod Identity agent and the Bedrock endpoint.
+# Anything else is dropped and counted as POLICY_DENIED, which NetworkDoctor
+# Rule 8 reports, so normal operation must produce no drops here.
+networkPolicy:
+  enabled: true
+  clients:
+    - namespace: holmesgpt
+      labels:
+        app: holmes
+  # The VPC CIDR: keep equal to vpc_cidr in deploy/terraform/envs/eks-lab
+  # (Argo apps cannot read Terraform values). toCIDR never matches pods, nodes or
+  # the API server (Cilium gives those their own identities), so in practice
+  # this admits only the bedrock-runtime endpoint interfaces.
+  bedrockEndpointCIDRs:
+    - 10.80.0.0/16

@@ -72,6 +72,17 @@ jobs:
           grep -q 'targetType: ip' /tmp/routes.yaml
           helm lint deploy/bootstrap -f deploy/bootstrap/eks-lab.yaml
 
+      - name: helm lint + template (EKS LLM gateway + Holmes EKS values)
+        run: |
+          helm lint deploy/helm/llm-gateway
+          helm template gw deploy/helm/llm-gateway -n llm-gateway > /tmp/gw.yaml
+          grep -q 'kind: CiliumNetworkPolicy' /tmp/gw.yaml
+          grep -q 'model: bedrock/' /tmp/gw.yaml
+          helm lint deploy/helm/holmesgpt -f deploy/helm/holmesgpt/values-eks-lab.yaml
+          helm template h deploy/helm/holmesgpt -n holmesgpt -f deploy/helm/holmesgpt/values-eks-lab.yaml > /tmp/holmes-eks.yaml
+          grep -q 'llm-gateway.llm-gateway.svc:4000' /tmp/holmes-eks.yaml
+          ! grep -q ': null' /tmp/holmes-eks.yaml
+
       - name: helm lint + template (demo chart)
         run: |
           helm lint deploy/helm/networkdoctor-demo

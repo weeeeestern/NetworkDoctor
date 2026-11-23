@@ -58,8 +58,17 @@ backend:
     digest: sha256:55d0788afb12641c07a7385dc6346f3dbd56daae9ee3854ab6cc4f9a5b17d7b1
   config:
     prometheusURL: http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090
-    # holmesURL: fill in once HolmesGPT is deployed on EKS
-    #   (deploy/helm/holmesgpt), use http://holmesgpt-holmes.holmesgpt.svc:80
+    # HolmesGPT child app (deploy/helm/holmesgpt), Service holmesgpt-holmes:80.
+    # Its gateway-* models go through the in-cluster LLM gateway to Bedrock.
+    holmesURL: http://holmesgpt-holmes.holmesgpt.svc:80
+    # Same model names as on-prem; the EKS gateway serves them from Bedrock.
+    holmesModel: gateway-luna
+    # Same model under the gateway's -eval alias (no separate billing on EKS:
+    # the gateway has no database).
+    evalHolmesModel: gateway-luna-eval
+    # Same investigation settings as the on-prem lab (values-onprem-lab.yaml).
+    arch: derived
+    correlationWindow: "0s"
   persistence:
     # EBS via the aws-ebs-csi-driver addon (Terraform), same gp2 class the
     # bootstrap gives Prometheus. EKS 1.30+ no longer marks gp2 as the default

@@ -15,7 +15,7 @@ locals {
   gateway_namespace   = "gateway"
   gateway_name        = "lab"
   # Namespaces whose HTTPRoutes may attach to the lab Gateway.
-  gateway_route_namespaces = ["networkdoctor", "monitoring", "holmesgpt"]
+  gateway_route_namespaces = ["networkdoctor", "monitoring"]
 }
 
 data "http" "gateway_api_crds" {

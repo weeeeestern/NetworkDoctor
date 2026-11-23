@@ -9,12 +9,26 @@ locals {
   llm_gateway_namespace       = "llm-gateway"
   llm_gateway_service_account = "llm-gateway"
 
-  # Claude models, called directly or through apac./global. cross-region
-  # inference profiles (the profile and the models it routes to).
-  bedrock_model_arns = [
-    "arn:aws:bedrock:*::foundation-model/anthropic.*",
-    "arn:aws:bedrock:*:${data.aws_caller_identity.current.account_id}:inference-profile/*",
-  ]
+  # Models the gateway may call, through their global. cross-region inference
+  # profiles. Keep in sync with deploy/helm/llm-gateway/values.yaml (models).
+  # GPT-6 Luna matches the on-prem Holmes model; Claude Haiku 4.5 is the
+  # fallback. Access and quotas for both were checked in Seoul (#38).
+  bedrock_model_ids = {
+    luna  = "openai.gpt-6-luna"
+    haiku = "anthropic.claude-haiku-4-5-20251001-v1:0"
+  }
+  # Global inference authorizes the source profile, the regional model and
+  # the regionless model separately (#38).
+  bedrock_model_arns = {
+    for name, model_id in local.bedrock_model_ids : name => {
+      profile    = "arn:aws:bedrock:${var.region}:${data.aws_caller_identity.current.account_id}:inference-profile/global.${model_id}"
+      regional   = "arn:aws:bedrock:${var.region}::foundation-model/${model_id}"
+      regionless = "arn:aws:bedrock:::foundation-model/${model_id}"
+    }
+  }
+  # Luna requests also authorize against the account's default project.
+  bedrock_default_project_arn = "arn:aws:bedrock:${var.region}:${data.aws_caller_identity.current.account_id}:project/default"
+  bedrock_invoke_actions      = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
 }
 
 data "aws_caller_identity" "current" {}
@@ -37,17 +51,24 @@ resource "aws_security_group" "bedrock_endpoint" {
   }
 }
 
+# Only the gateway role, only the two models. The role policy below ties
+# each underlying model to its own profile.
 data "aws_iam_policy_document" "bedrock_endpoint" {
   statement {
     principals {
       type        = "AWS"
       identifiers = ["*"]
     }
-    actions = [
-      "bedrock:InvokeModel",
-      "bedrock:InvokeModelWithResponseStream",
-    ]
-    resources = local.bedrock_model_arns
+    actions = local.bedrock_invoke_actions
+    resources = concat([local.bedrock_default_project_arn], flatten([
+      for model in local.bedrock_model_arns : [model.profile, model.regional, model.regionless]
+    ]))
+
+    condition {
+      test     = "ArnEquals"
+      variable = "aws:PrincipalArn"
+      values   = [aws_iam_role.llm_gateway.arn]
+    }
   }
 }
 
@@ -65,11 +86,56 @@ resource "aws_vpc_endpoint" "bedrock_runtime" {
 
 data "aws_iam_policy_document" "llm_gateway" {
   statement {
-    actions = [
-      "bedrock:InvokeModel",
-      "bedrock:InvokeModelWithResponseStream",
-    ]
-    resources = local.bedrock_model_arns
+    actions   = local.bedrock_invoke_actions
+    resources = concat([local.bedrock_default_project_arn], [for model in local.bedrock_model_arns : model.profile])
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.region]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = local.bedrock_model_arns
+
+    content {
+      actions   = local.bedrock_invoke_actions
+      resources = [statement.value.regional]
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestedRegion"
+        values   = [var.region]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "bedrock:InferenceProfileArn"
+        values   = [statement.value.profile]
+      }
+    }
+  }
+
+  dynamic "statement" {
+    for_each = local.bedrock_model_arns
+
+    content {
+      actions   = local.bedrock_invoke_actions
+      resources = [statement.value.regionless]
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestedRegion"
+        values   = ["unspecified"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "bedrock:InferenceProfileArn"
+        values   = [statement.value.profile]
+      }
+    }
   }
 }
 

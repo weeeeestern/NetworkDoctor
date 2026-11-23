@@ -99,9 +99,13 @@ applications:
     valueFiles:
       - values-eks-lab.yaml
 
-  # Optional HolmesGPT RCA agent: leave unsynced until an EKS-reachable LLM
-  # gateway and Secret holmes-llm (LLM_GATEWAY_KEY) are configured. The EKS
-  # values below fill only the known Prometheus address; sync Holmes last.
+  # LiteLLM proxy to Bedrock (VPC endpoint + Pod Identity, no internet).
+  # Its master key Secret comes from Terraform (envs/eks-lab/llm.tf).
+  - name: llm-gateway
+    namespace: llm-gateway
+
+  # HolmesGPT RCA agent on the gateway above. Secret holmes-llm also comes
+  # from Terraform. Sync after llm-gateway and monitoring.
   - name: holmesgpt
     namespace: holmesgpt
     valueFiles:

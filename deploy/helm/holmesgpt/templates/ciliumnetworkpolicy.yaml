@@ -1,0 +1,27 @@
+{{- if .Values.networkPolicy.enabled }}
+# Only the NetworkDoctor backend may call Holmes (no ALB route either; use
+# port-forward, which goes through the kubelet and is allowed). Egress stays open: the
+# fetch-skills init container clones from GitHub, and FQDN egress rules need
+# the L7 DNS proxy, which Cilium's aws-cni chaining mode does not fully
+# support. The LLM gateway's own policy keeps model traffic off the internet.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: holmes
+  namespace: {{ .Release.Namespace }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: holmes
+  ingress:
+    - fromEndpoints:
+        {{- range .Values.networkPolicy.clients }}
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ .namespace }}
+            {{- toYaml .labels | nindent 12 }}
+        {{- end }}
+      toPorts:
+        - ports:
+            - port: "5050"
+              protocol: TCP
+{{- end }}

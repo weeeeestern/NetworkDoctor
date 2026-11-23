@@ -1,6 +1,6 @@
 # The Gateway Terraform creates (deploy/terraform/envs/eks-lab/gateway.tf).
-# Its listener only admits routes from the networkdoctor, monitoring and
-# holmesgpt namespaces.
+# Its listener only admits routes from the networkdoctor and monitoring
+# namespaces.
 gateway:
   name: lab
   namespace: gateway
@@ -31,12 +31,5 @@ routes:
     port: 80
     healthCheckPath: /api/health
 
-  # HolmesGPT serves an API (POST /api/chat), not a UI. Enable only when it
-  # is deployed and should be reachable from outside the cluster.
-  - name: holmes
-    enabled: false
-    host: holmes
-    namespace: holmesgpt
-    service: holmesgpt-holmes
-    port: 80
-    healthCheckPath: /healthz
+  # No HolmesGPT route: it is an API (POST /api/chat) that only the backend
+  # calls, and its CiliumNetworkPolicy admits nothing else. Use port-forward.
