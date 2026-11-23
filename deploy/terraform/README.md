@@ -30,7 +30,7 @@ Cat Shop을 배포한다. 시연 전에는 **워커 3대의 수집, 백엔드 In
   access entry에 등록된 역할(GitHub Actions 역할, `admin_role_arns`, `team_role_arns`)만
   권한을 받는다.
 - **HolmesGPT는 Bedrock에 연결한다.** 프라이빗 서브넷의 `bedrock-runtime`
-  인터페이스 엔드포인트로 서울 리전에 요청한다. 전시용 Claude Haiku 4.5 Global
+  인터페이스 엔드포인트로 서울 리전에 요청한다. 온프렘 장애 분석과 같은 GPT-5.6 Luna의 Global
   프로필은 실제 추론을 다른 리전에서도 처리할 수 있다. `holmesgpt/holmes-bedrock`
   서비스 계정에 전용 Pod Identity가 임시 자격증명을 제공한다.
 - Cilium은 VPC CNI 위에서 네트워크 정책과 Hubble 메트릭을 제공한다. VPC CNI는
@@ -370,10 +370,10 @@ unset nd_slack_webhook
 incident_id='시연용 장애의 Incident ID'
 curl -fsS -X POST "http://127.0.0.1:8080/incidents/$incident_id/holmes"
 curl -fsS "http://127.0.0.1:8080/incidents/$incident_id" |
-  jq '{holmes_status, holmes_model, holmes_analysis, holmes_error}'
+  jq '{holmes_status, holmes_model, holmes_tool_calls, holmes_analysis, holmes_error}'
 ```
 
-두 번째 명령을 반복해 `holmes_status`가 `done`이고 분석 내용이 표시되는지 확인한다.
+두 번째 명령을 반복해 `holmes_status`가 `done`이고, `holmes_tool_calls`와 조회한 증거의 분석이 표시되는지 확인한다.
 
 ## 4. 5일 뒤 정리
 

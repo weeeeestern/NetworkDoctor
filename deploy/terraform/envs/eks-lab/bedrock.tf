@@ -12,7 +12,6 @@ locals {
   # inference profiles (the profile and the models it routes to).
   bedrock_model_arns = [
     "arn:aws:bedrock:*::foundation-model/anthropic.*",
-    "arn:aws:bedrock:::foundation-model/${local.holmes_model_id}",
     "arn:aws:bedrock:*:${data.aws_caller_identity.current.account_id}:inference-profile/*",
   ]
 }
@@ -47,7 +46,11 @@ data "aws_iam_policy_document" "bedrock_endpoint" {
       "bedrock:InvokeModel",
       "bedrock:InvokeModelWithResponseStream",
     ]
-    resources = local.bedrock_model_arns
+    resources = concat(local.bedrock_model_arns, [
+      local.holmes_default_project_arn,
+      local.holmes_regional_model_arn,
+      local.holmes_global_model_arn,
+    ])
   }
 }
 

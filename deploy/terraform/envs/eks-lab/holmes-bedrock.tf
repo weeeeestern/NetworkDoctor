@@ -1,7 +1,10 @@
 locals {
   # Keep the profile in sync with deploy/helm/holmesgpt/values-eks-lab.yaml.
-  holmes_model_id    = "anthropic.claude-haiku-4-5-20251001-v1:0"
-  holmes_profile_arn = "arn:aws:bedrock:${var.region}:${data.aws_caller_identity.current.account_id}:inference-profile/global.${local.holmes_model_id}"
+  holmes_model_id            = "openai.gpt-5.6-luna"
+  holmes_profile_arn         = "arn:aws:bedrock:${var.region}:${data.aws_caller_identity.current.account_id}:inference-profile/global.${local.holmes_model_id}"
+  holmes_regional_model_arn  = "arn:aws:bedrock:${var.region}::foundation-model/${local.holmes_model_id}"
+  holmes_default_project_arn = "arn:aws:bedrock:${var.region}:${data.aws_caller_identity.current.account_id}:project/default"
+  holmes_global_model_arn    = "arn:aws:bedrock:::foundation-model/${local.holmes_model_id}"
 }
 
 data "aws_iam_policy_document" "holmes_assume" {
@@ -39,11 +42,12 @@ resource "aws_iam_role" "holmes_bedrock" {
 }
 
 # Global inference authorizes the source profile, regional model, and
-# regionless model separately. Only allow the underlying model via this profile.
+# regionless model separately. The source statement also covers the default
+# project used by Converse. Only allow the underlying model via this profile.
 data "aws_iam_policy_document" "holmes_bedrock" {
   statement {
     actions   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
-    resources = [local.holmes_profile_arn]
+    resources = [local.holmes_profile_arn, local.holmes_default_project_arn]
 
     condition {
       test     = "StringEquals"
@@ -54,7 +58,7 @@ data "aws_iam_policy_document" "holmes_bedrock" {
 
   statement {
     actions   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
-    resources = ["arn:aws:bedrock:${var.region}::foundation-model/${local.holmes_model_id}"]
+    resources = [local.holmes_regional_model_arn]
 
     condition {
       test     = "StringEquals"
@@ -71,7 +75,7 @@ data "aws_iam_policy_document" "holmes_bedrock" {
 
   statement {
     actions   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
-    resources = ["arn:aws:bedrock:::foundation-model/${local.holmes_model_id}"]
+    resources = [local.holmes_global_model_arn]
 
     condition {
       test     = "StringEquals"

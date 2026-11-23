@@ -59,7 +59,7 @@ backend:
   config:
     prometheusURL: http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090
     holmesURL: http://holmesgpt-holmes.holmesgpt.svc:80
-    holmesModel: bedrock-haiku
+    holmesModel: bedrock-luna
     # The exhibit operator starts analysis on the selected incident.
     holmesAuto: "false"
     holmesSkipRulePrefixes: smoke-

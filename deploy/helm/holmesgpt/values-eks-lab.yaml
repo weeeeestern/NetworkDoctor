@@ -4,28 +4,33 @@ holmes:
   extraEnvVarsSecrets: []
 
   modelList:
-    bedrock-haiku: &bedrock-haiku
-      model: bedrock/converse/global.anthropic.claude-haiku-4-5-20251001-v1:0
+    bedrock-luna: &bedrock-luna
+      model: bedrock/converse/global.openai.gpt-5.6-luna
       aws_region_name: ap-northeast-2
     # Helm keeps null model entries in the subchart, and Holmes rejects them.
     # Redirect inherited aliases to Bedrock and clear their gateway settings.
     gateway-sonnet: &bedrock-without-gateway
-      <<: *bedrock-haiku
+      <<: *bedrock-luna
       api_base: null
       api_key: null
+      temperature: null
     gateway-haiku: *bedrock-without-gateway
     gateway-luna: *bedrock-without-gateway
 
   # This list replaces the base environment, including its gateway alias.
   additionalEnvVars:
     - name: MODEL
-      value: bedrock-haiku
+      value: bedrock-luna
     - name: ROBUSTA_AI
       value: "false"
     - name: MAX_STEPS
       value: "20"
     - name: AWS_EC2_METADATA_DISABLED
       value: "true"
+    # Holmes 0.38.1 bundles a LiteLLM catalog that predates Luna on Bedrock.
+    # Pin the upstream catalog that marks the Global profile as tool-capable.
+    - name: LITELLM_MODEL_COST_MAP_URL
+      value: https://raw.githubusercontent.com/BerriAI/litellm/244616d1ba12f30465a54d392b7937d74b9acc92/model_prices_and_context_window.json
 
   toolsets:
     prometheus/metrics:
