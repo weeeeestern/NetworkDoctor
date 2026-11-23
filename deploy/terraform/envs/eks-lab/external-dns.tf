@@ -59,8 +59,10 @@ resource "helm_release" "external_dns" {
     sources       = ["gateway-httproute"]
     domainFilters = [var.domain]
     txtOwnerId    = var.name
-    policy        = "sync" # remove records when the HTTPRoute goes away
-    extraArgs     = ["--aws-zone-type=public"]
+    # Keep the apex alias ownership TXT record inside the public zone.
+    txtPrefix = "nd-%%{record_type}."
+    policy    = "sync" # remove records when the HTTPRoute goes away
+    extraArgs = ["--aws-zone-type=public", "--zone-id-filter=${data.aws_route53_zone.lab.zone_id}"]
     env = [{
       name  = "AWS_DEFAULT_REGION"
       value = var.region
