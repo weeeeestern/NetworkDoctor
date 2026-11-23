@@ -87,7 +87,7 @@ applications:
     valueFiles:
       - values-eks-lab.yaml
 
-  # HTTPRoutes (nd./grafana. hosts) on the Terraform-managed Gateway. Its
+  # HTTPRoutes (NetworkDoctor apex and Grafana host) on the Terraform-managed Gateway. Its
   # routes live in the networkdoctor and monitoring namespaces, so sync it
   # after those two apps.
   - name: gateway-routes

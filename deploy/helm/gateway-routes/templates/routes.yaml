@@ -1,5 +1,9 @@
 {{- range .Values.routes }}
 {{- if ne .enabled false }}
+{{- $hostname := $.Values.domain }}
+{{- with .host }}
+{{- $hostname = printf "%s.%s" . $hostname }}
+{{- end }}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -17,7 +21,7 @@ spec:
       namespace: {{ $.Values.gateway.namespace }}
       sectionName: https
   hostnames:
-    - {{ printf "%s.%s" .host $.Values.domain | quote }}
+    - {{ $hostname | quote }}
   rules:
     - matches:
         {{- range (.methods | default (list "")) }}

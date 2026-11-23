@@ -6,7 +6,7 @@ gateway:
   namespace: gateway
 
 # Must match the Terraform `domain` variable. external-dns writes
-# <host>.<domain> into the Route53 zone from each route's hostname.
+# Route53 aliases from the route hostnames. An empty host uses the zone apex.
 domain: netdoc.cloud
 
 # One HTTPRoute + TargetGroupConfiguration per entry, created in the
@@ -15,7 +15,7 @@ domain: netdoc.cloud
 routes:
   # Read-only from the internet; changes go through port-forward (README).
   - name: networkdoctor
-    host: nd
+    host: ""
     namespace: networkdoctor
     service: networkdoctor-backend
     port: 8080

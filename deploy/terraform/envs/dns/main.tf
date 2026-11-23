@@ -12,7 +12,7 @@ resource "aws_route53_zone" "this" {
   name = var.domain
 }
 
-# Covers the apex and every lab host (nd., grafana., holmes.).
+# Covers the NetworkDoctor apex and the lab subdomains.
 resource "aws_acm_certificate" "this" {
   domain_name               = var.domain
   subject_alternative_names = ["*.${var.domain}"]
