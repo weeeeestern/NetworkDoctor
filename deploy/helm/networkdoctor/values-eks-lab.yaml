@@ -65,8 +65,8 @@ backend:
   nodeSelector:
     networkdoctor.io/stateful: "true"
   image:
-    # Published linux/amd64 image, main-7840680 (Slack card messages).
-    digest: sha256:33c9407ba163927f733adacc6eefb703a068e140bb7f96294770061e24e9f09a
+    # Published linux/amd64 image, main-aa5109d (analysis stat excludes skipped).
+    digest: sha256:21ac2e82306d5e3eef3f01c20b1ca0f59f75dbdafeab97457801b52aa6dacd0b
   config:
     prometheusURL: http://monitoring-kube-prometheus-prometheus.monitoring.svc:9090
     # HolmesGPT child app (deploy/helm/holmesgpt), Service holmesgpt-holmes:80.
