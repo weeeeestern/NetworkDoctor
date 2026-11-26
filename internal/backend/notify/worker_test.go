@@ -92,7 +92,7 @@ func TestWorkerPersistsBeforeHTTPAndSendsOneParentForRepeatedScans(t *testing.T)
 	i := f.add("one", "C1")
 	f.sender.before = func(m Message) {
 		receipt := f.get(i.IncidentID).SlackNotification.Parent
-		if receipt.State != "sending" || receipt.Attempts != 1 || receipt.Payload != m.Text {
+		if receipt.State != "sending" || receipt.Attempts != 1 || receipt.Payload != encodeCard(m.Text, m.Attachments) {
 			t.Fatalf("not durably claimed: %#v", receipt)
 		}
 		_, err := f.store.Update(i.IncidentID, func(i *incident.Incident) error { i.RecoveryStatus = "resolved"; return nil })
@@ -110,7 +110,7 @@ func TestWorkerPersistsBeforeHTTPAndSendsOneParentForRepeatedScans(t *testing.T)
 	if got.RecoveryStatus != "resolved" {
 		t.Fatal("ack overwrote concurrent recovery update")
 	}
-	text := f.sender.messages[0].Text
+	text := allText(f.sender.messages[0])
 	if !strings.Contains(text, "장애 감지") || !strings.Contains(text, "&lt;!here&gt;") || !strings.Contains(text, "node&amp;1") || strings.Contains(text, "추정 원인") {
 		t.Fatalf("unsafe or premature parent: %s", text)
 	}
@@ -130,7 +130,7 @@ func TestWorkerFastAnalysisWaitsForParentAndOwnThread(t *testing.T) {
 	if len(f.sender.messages) != 2 || f.sender.messages[1].ThreadTS != got.Parent.TS || got.Reply.State != "sent" || got.LastSourceAttempt != 1 {
 		t.Fatalf("bad thread/receipt: %#v %#v", got, f.sender.messages)
 	}
-	if strings.Contains(f.sender.messages[1].Text, "<@U1>") || !strings.Contains(f.sender.messages[1].Text, "&lt;@U1&gt;") {
+	if reply := allText(f.sender.messages[1]); strings.Contains(reply, "<@U1>") || !strings.Contains(reply, "&lt;@U1&gt;") {
 		t.Fatal("analysis can mention users")
 	}
 }
@@ -171,10 +171,10 @@ func TestWorkerGroupMembersAndLateJoinEachHaveOwnThread(t *testing.T) {
 		for _, m := range f.sender.messages {
 			if m.ThreadTS == r.Parent.TS {
 				found = true
-				if id != primary.IncidentID && !strings.Contains(m.Text, "함께 묶인 알림의 분석 결과") {
+				if id != primary.IncidentID && !strings.Contains(allText(m), "함께 묶인 알림의 분석 결과") {
 					t.Fatal("shared analysis not labeled")
 				}
-				if id != primary.IncidentID && !strings.Contains(m.Text, "대표 인시던트: "+primary.IncidentID) {
+				if id != primary.IncidentID && !strings.Contains(allText(m), "대표 인시던트: "+primary.IncidentID) {
 					t.Fatal("shared analysis does not identify its representative source")
 				}
 			}
@@ -348,16 +348,94 @@ func TestWorkerFailedAcknowledgementNeverBlindRetries(t *testing.T) {
 	}
 }
 
-func TestReplyTextReadsAsVerdictCauseAndIncidentState(t *testing.T) {
+func TestReplyCardReadsAsVerdictCauseAndIncidentState(t *testing.T) {
 	w := NewWorker(Options{})
 	inc := &incident.Incident{Scenario: "network-congestion", RecoveryStatus: incident.RecoveryOpen}
-	text := w.replyText(inc, incident.ResultView{Result: map[string]any{
+	view := incident.ResultView{Result: map[string]any{
 		"investigation_status": "excluded",
 		"confidence":           "high",
 		"summary":              map[string]any{"cause": "front 파드가 catshop 주소를 찾지 못해 요청이 늦어졌습니다."},
-	}})
-	want := "*원인 분석 완료*\n판단: 네트워크 혼잡 아님 · 신뢰도 높음\n추정 원인: front 파드가 catshop 주소를 찾지 못해 요청이 늦어졌습니다.\n장애 상태: 아직 진행 중"
-	if text != want {
-		t.Fatalf("reply =\n%s\nwant\n%s", text, want)
+	}}
+	if got := w.replyText(inc, view); got != "✅ *원인 분석 완료*" {
+		t.Fatalf("reply text = %q", got)
 	}
+	attachments := w.replyCard(inc, view)
+	if len(attachments) != 1 || attachments[0].Color != colorOther {
+		t.Fatalf("a rejected scenario should be one yellow card: %#v", attachments)
+	}
+	got := allText(Message{Attachments: attachments})
+	for _, want := range []string{"*판단*\n네트워크 혼잡 아님", "*신뢰도*\n높음", "*추정 원인*\nfront 파드가 catshop 주소를 찾지 못해 요청이 늦어졌습니다.", "*장애 상태*\n아직 진행 중"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("reply card missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestParentCardShortensNodesAndUsesKST(t *testing.T) {
+	w := NewWorker(Options{})
+	inc := &incident.Incident{
+		Scenario:       "networkpolicy-misconfiguration",
+		SymptomSummary: "Cilium이 정책으로 트래픽 차단",
+		AffectedNodes:  []string{"ip-10-80-13-35.ap-northeast-2.compute.internal"},
+		StartsAt:       time.Date(2026, 11, 26, 2, 0, 32, 0, time.UTC),
+	}
+	attachments := w.parentCard(inc)
+	if len(attachments) != 1 || attachments[0].Color != colorFiring {
+		t.Fatalf("parent should be one red card: %#v", attachments)
+	}
+	got := allText(Message{Attachments: attachments})
+	for _, want := range []string{"*증상*\nCilium이 정책으로 트래픽 차단", "*노드*\nip-10-80-13-35", "*발생*\n11월 26일 11:00:32 KST"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("parent card missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "compute.internal") {
+		t.Fatalf("node name not shortened:\n%s", got)
+	}
+}
+
+func TestCardPayloadRoundTripsAndKeepsPlainTextPayloads(t *testing.T) {
+	attachments := []Attachment{{Color: colorFiring, Blocks: blocks(contextBlock("a & <b>"))}}
+	m := decodeCard(encodeCard("title", attachments))
+	if m.Text != "title" || allText(m) != "title\na & <b>" {
+		t.Fatalf("round trip = %#v", m)
+	}
+	if m := decodeCard("*장애 감지 · old*"); m.Text != "*장애 감지 · old*" || m.Attachments != nil {
+		t.Fatalf("plain payload = %#v", m)
+	}
+}
+
+// allText joins the message text and every text inside its blocks.
+func allText(m Message) string {
+	parts := []string{m.Text}
+	var walk func(any)
+	walk = func(v any) {
+		switch v := v.(type) {
+		case map[string]any:
+			if text, ok := v["text"].(string); ok {
+				parts = append(parts, text)
+			}
+			for k, child := range v {
+				if k != "text" {
+					walk(child)
+				} else if _, ok := child.(string); !ok {
+					walk(child)
+				}
+			}
+		case []map[string]any:
+			for _, child := range v {
+				walk(child)
+			}
+		case []any:
+			for _, child := range v {
+				walk(child)
+			}
+		}
+	}
+	for _, a := range m.Attachments {
+		for _, b := range a.Blocks {
+			walk(b)
+		}
+	}
+	return strings.Join(parts, "\n")
 }

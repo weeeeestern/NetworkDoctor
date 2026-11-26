@@ -15,7 +15,19 @@ import (
 	"time"
 )
 
-type Message struct{ Channel, Text, ThreadTS string }
+// Message is one chat.postMessage call. Text is the notification and
+// fallback line; Attachments, when present, carry the coloured card.
+type Message struct {
+	Channel, Text, ThreadTS string
+	Attachments             []Attachment
+}
+
+// Attachment is a legacy Slack attachment used only for its colour bar, with
+// Block Kit blocks inside.
+type Attachment struct {
+	Color  string           `json:"color"`
+	Blocks []map[string]any `json:"blocks"`
+}
 type Posted struct{ Channel, TS string }
 type Sender interface {
 	Post(context.Context, Message) (Posted, error)
@@ -45,14 +57,15 @@ func NewClient(token string) *Client {
 
 func (c *Client) Post(ctx context.Context, message Message) (Posted, error) {
 	payload := struct {
-		Channel        string `json:"channel"`
-		Text           string `json:"text"`
-		ThreadTS       string `json:"thread_ts,omitempty"`
-		ReplyBroadcast bool   `json:"reply_broadcast"`
-		UnfurlLinks    bool   `json:"unfurl_links"`
-		UnfurlMedia    bool   `json:"unfurl_media"`
-		Parse          string `json:"parse"`
-	}{Channel: message.Channel, Text: message.Text, ThreadTS: message.ThreadTS, Parse: "none"}
+		Channel        string       `json:"channel"`
+		Text           string       `json:"text"`
+		ThreadTS       string       `json:"thread_ts,omitempty"`
+		Attachments    []Attachment `json:"attachments,omitempty"`
+		ReplyBroadcast bool         `json:"reply_broadcast"`
+		UnfurlLinks    bool         `json:"unfurl_links"`
+		UnfurlMedia    bool         `json:"unfurl_media"`
+		Parse          string       `json:"parse"`
+	}{Channel: message.Channel, Text: message.Text, ThreadTS: message.ThreadTS, Attachments: message.Attachments, Parse: "none"}
 	raw, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(raw))
 	if err != nil {
