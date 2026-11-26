@@ -143,6 +143,8 @@
 
     const firing = rowsAll.filter((i) => i.alert_status === 'firing').length;
     const investigated = rowsAll.filter((i) => i.holmes_status === 'done').length;
+    // Rules excluded from automatic analysis (smoke-*) do not count toward the total.
+    const analyzable = rowsAll.filter((i) => i.holmes_status !== 'skipped').length;
 
     const filtered = listState.filter === 'all'
       ? rowsAll
@@ -196,7 +198,7 @@
           </div>
           <div class="card stat-card">
             <div class="stat-k">원인 분석 완료</div>
-            <div class="stat-v">${investigated}<span class="stat-of"> / ${rowsAll.length}</span></div>
+            <div class="stat-v">${investigated}<span class="stat-of"> / ${analyzable}</span></div>
           </div>
         </div>
         <div class="card chart-card">
