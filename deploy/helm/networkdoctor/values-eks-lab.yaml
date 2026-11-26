@@ -14,6 +14,17 @@ grafana:
 ui:
   url: https://netdoc.cloud
 
+# Backend Slack bot, same channel and bot as values-onprem-lab.yaml: a
+# "장애 감지" message per incident, the RCA result as a thread reply with the
+# report link, and no smoke alerts. Create the Secret by hand before syncing
+# (not in Git); the backend pod cannot start without it.
+slack:
+  enabled: true
+  # #incidents in the team workspace.
+  channelID: "C0CG7301YEQ"
+  existingSecret: networkdoctor-slack-bot
+  botTokenKey: bot-token
+
 agent:
   # The t3a.medium AL2023 primary ENA uses the systemd slot name ens5.
   # Verify the host's default-route interface on each worker and override
