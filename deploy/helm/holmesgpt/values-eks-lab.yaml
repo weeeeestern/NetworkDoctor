@@ -30,8 +30,16 @@ holmes:
 
   # The list replaces the base one as a whole; only MODEL differs.
   additionalEnvVars:
+    # Backend requests gateway-haiku (GPT-6 Luna is not available to this
+    # Bedrock account); keep Holmes' own default on the same model.
     - name: MODEL
-      value: gateway-luna
+      value: gateway-haiku
+    # Holmes sends tool schemas in OpenAI strict mode, which turns every
+    # optional parameter into a nullable union. Bedrock Claude rejects more
+    # than 16 union-typed parameters ("Schemas contains too many parameters
+    # with union types (30 ...)"), so every investigation failed on Haiku.
+    - name: HOLMES_DISABLE_STRICT_TOOL_CALLS
+      value: "true"
     - name: ROBUSTA_AI
       value: "false"
     - name: MAX_STEPS
