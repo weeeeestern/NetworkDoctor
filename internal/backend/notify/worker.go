@@ -2,8 +2,8 @@ package notify
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -157,6 +157,7 @@ func (w *Worker) deliver(ctx context.Context, snapshot *incident.Incident, reply
 		return nil
 	}
 	var message Message
+	var payload string
 	var attempt int
 	claimed := false
 	_, err := w.o.Store.Update(snapshot.IncidentID, func(cur *incident.Incident) error {
@@ -187,9 +188,9 @@ func (w *Worker) deliver(ctx context.Context, snapshot *incident.Incident, reply
 		}
 		if d.Payload == "" {
 			if reply {
-				d.Payload = w.replyText(cur, view)
+				d.Payload = encodeCard(w.replyText(cur, view), w.replyCard(cur, view))
 			} else {
-				d.Payload = w.parentText(cur)
+				d.Payload = encodeCard(w.parentText(cur), w.parentCard(cur))
 			}
 		}
 		d.State = "sending"
@@ -197,7 +198,9 @@ func (w *Worker) deliver(ctx context.Context, snapshot *incident.Incident, reply
 		d.NextAttemptAt = nil
 		d.LastErrorCode = ""
 		attempt = d.Attempts
-		message = Message{Channel: channel, Text: d.Payload}
+		payload = d.Payload
+		message = decodeCard(d.Payload)
+		message.Channel = channel
 		if reply {
 			message.ThreadTS = n.Parent.TS
 		}
@@ -237,7 +240,7 @@ func (w *Worker) deliver(ctx context.Context, snapshot *incident.Incident, reply
 		if reply {
 			d = &n.Reply
 		}
-		if d.State != "sending" || d.Attempts != attempt || d.Payload != message.Text {
+		if d.State != "sending" || d.Attempts != attempt || d.Payload != payload {
 			return incident.ErrNoChange
 		}
 		if delivery != nil {
@@ -291,42 +294,154 @@ var slackEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
 func escape(text string) string { return slackEscaper.Replace(text) }
 
-func (w *Worker) parentText(i *incident.Incident) string {
-	text := fmt.Sprintf("*장애 감지 · %s*\n증상: %s\n노드: %s\n발생: %s", escape(i.ScenarioName()), escape(i.SymptomSummary), escape(strings.Join(i.AffectedNodes, ", ")), i.StartsAt.UTC().Format(time.RFC3339))
-	if url := w.o.Links.For(i).Grafana; url != "" {
-		text += "\n<" + escape(url) + "|Grafana에서 보기>"
-	}
-	return text
+// Card colours: red while an incident is new, green when the analysis
+// confirms the scenario, yellow for any other conclusion.
+const (
+	colorFiring    = "#E01E5A"
+	colorConfirmed = "#2EB67D"
+	colorOther     = "#ECB22E"
+)
+
+var kst = time.FixedZone("KST", 9*60*60)
+
+// slackTime renders a timestamp the way the Korean UI reads it.
+func slackTime(t time.Time) string { return t.In(kst).Format("1월 2일 15:04:05") + " KST" }
+
+// shortNode keeps the first DNS label ("ip-10-80-13-35" from the EKS FQDN).
+func shortNode(node string) string {
+	name, _, _ := strings.Cut(node, ".")
+	return name
 }
 
+func shortNodes(nodes []string) string {
+	out := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		out = append(out, shortNode(n))
+	}
+	return strings.Join(out, ", ")
+}
+
+func mrkdwn(text string) map[string]any { return map[string]any{"type": "mrkdwn", "text": text} }
+
+// field is one "*label*\nvalue" cell; empty values are left out by the caller.
+func field(label, value string) map[string]any { return mrkdwn("*" + label + "*\n" + value) }
+
+// fieldsBlock returns nil when there is nothing to show, because Slack
+// rejects a section with an empty fields list.
+func fieldsBlock(fields ...map[string]any) map[string]any {
+	var kept []map[string]any
+	for _, f := range fields {
+		if f != nil {
+			kept = append(kept, f)
+		}
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return map[string]any{"type": "section", "fields": kept}
+}
+
+func contextBlock(text string) map[string]any {
+	return map[string]any{"type": "context", "elements": []map[string]any{mrkdwn(text)}}
+}
+
+func blocks(bs ...map[string]any) []map[string]any {
+	var kept []map[string]any
+	for _, b := range bs {
+		if b != nil {
+			kept = append(kept, b)
+		}
+	}
+	return kept
+}
+
+// truncate keeps a section under Slack's 3000-character text limit.
+func truncate(text string, max int) string {
+	r := []rune(text)
+	if len(r) <= max {
+		return text
+	}
+	return string(r[:max-1]) + "…"
+}
+
+// parentText is the notification line; the details are in parentCard.
+func (w *Worker) parentText(i *incident.Incident) string {
+	return "🔴 *장애 감지 · " + escape(i.ScenarioName()) + "*"
+}
+
+func (w *Worker) parentCard(i *incident.Incident) []Attachment {
+	var nodes map[string]any
+	if len(i.AffectedNodes) > 0 {
+		nodes = field("노드", escape(shortNodes(i.AffectedNodes)))
+	}
+	var link map[string]any
+	if url := w.o.Links.For(i).Grafana; url != "" {
+		link = contextBlock("📈 <" + escape(url) + "|Grafana에서 보기>")
+	}
+	return []Attachment{{Color: colorFiring, Blocks: blocks(
+		map[string]any{"type": "section", "text": mrkdwn("*증상*\n" + escape(truncate(i.SymptomSummary, 2900)))},
+		fieldsBlock(nodes, field("발생", slackTime(i.StartsAt))),
+		link,
+	)}}
+}
+
+// replyText is the thread notification line; the details are in replyCard.
 func (w *Worker) replyText(i *incident.Incident, view incident.ResultView) string {
+	return "✅ *원인 분석 완료*"
+}
+
+func (w *Worker) replyCard(i *incident.Incident, view incident.ResultView) []Attachment {
 	h := i.HeadlineFor(view.Result)
 	conf, _ := view.Result["confidence"].(string)
-	text := "*원인 분석 완료*"
+	color := colorOther
+	if strings.HasSuffix(h.Verdict, "맞음") {
+		color = colorConfirmed
+	}
+	var shared, verdict, confidence, cause, link map[string]any
 	if view.Shared {
-		text += "\n함께 묶인 알림의 분석 결과입니다 (이 알림을 따로 검증하지는 않음)"
-		text += "\n대표 인시던트: " + escape(view.SourceIncidentID)
+		shared = contextBlock("함께 묶인 알림의 분석 결과입니다 (이 알림을 따로 검증하지는 않음) · 대표 인시던트: " + escape(view.SourceIncidentID))
 	}
-	c := incident.ConfidenceName(conf)
-	switch {
-	case h.Verdict != "" && c != "":
-		text += "\n판단: " + escape(h.Verdict) + " · 신뢰도 " + c
-	case h.Verdict != "":
-		text += "\n판단: " + escape(h.Verdict)
-	case c != "":
-		text += "\n신뢰도: " + c
+	if h.Verdict != "" {
+		verdict = field("판단", escape(h.Verdict))
 	}
-	if h.Cause != "" {
-		text += "\n" + escape(h.CauseLabel) + ": " + escape(h.Cause)
+	if c := incident.ConfidenceName(conf); c != "" {
+		confidence = field("신뢰도", c)
 	}
 	// "장애 상태" because a bare "상태: 진행 중" under "원인 분석 완료" reads
 	// as if the analysis were still running.
 	recovery := map[string]string{incident.RecoveryOpen: "아직 진행 중", incident.RecoveryResolved: "복구됨"}[i.RecoveryStatus]
-	text += "\n장애 상태: " + escape(firstNonEmpty(recovery, i.RecoveryStatus))
-	if url := w.o.Links.For(i).Incident; url != "" {
-		text += "\n<" + escape(url) + "|레포트 보기>"
+	state := field("장애 상태", escape(firstNonEmpty(recovery, i.RecoveryStatus)))
+	if h.Cause != "" {
+		cause = map[string]any{"type": "section", "text": mrkdwn("*" + escape(h.CauseLabel) + "*\n" + escape(truncate(h.Cause, 2900)))}
 	}
-	return text
+	if url := w.o.Links.For(i).Incident; url != "" {
+		link = contextBlock("📄 <" + escape(url) + "|레포트 보기>")
+	}
+	return []Attachment{{Color: color, Blocks: blocks(shared, fieldsBlock(verdict, confidence, state), cause, link)}}
+}
+
+// card is what a delivery stores in Payload, so a retry resends exactly the
+// same message.
+type card struct {
+	Text        string       `json:"text"`
+	Attachments []Attachment `json:"attachments,omitempty"`
+}
+
+func encodeCard(text string, attachments []Attachment) string {
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(card{Text: text, Attachments: attachments})
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// decodeCard also accepts the plain text payloads stored before cards.
+func decodeCard(payload string) Message {
+	var c card
+	if strings.HasPrefix(payload, "{") && json.Unmarshal([]byte(payload), &c) == nil && c.Text != "" {
+		return Message{Text: c.Text, Attachments: c.Attachments}
+	}
+	return Message{Text: payload}
 }
 
 func firstNonEmpty(v ...string) string {
