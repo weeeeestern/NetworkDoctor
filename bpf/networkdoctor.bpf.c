@@ -29,6 +29,7 @@
  *     sched_wakeup, sched_wakeup_new, sched_switch
  *   - attach kprobe: tcp_rcv_established
  *   - attach nd_tc_ingress to TC ingress and nd_tc_egress to TC egress
+ *     (tcx head on Linux 6.6+, clsact filters otherwise)
  *   - read per-CPU maps by summing CPU values
  *   - scan nd_dns_pending and nd_udp_flows for timeout/idle expiration
  */
@@ -57,8 +58,11 @@ char LICENSE[] SEC("license") = "GPL";
 #define IPPROTO_UDP 17
 #endif
 
-#ifndef TC_ACT_OK
-#define TC_ACT_OK 0
+/* TC_ACT_UNSPEC passes the packet on to the next program: the next tcx
+ * program (for example Cilium's) or, at the end of the chain, the default
+ * action. TC_ACT_OK would end the chain and skip the programs behind us. */
+#ifndef TC_ACT_UNSPEC
+#define TC_ACT_UNSPEC (-1)
 #endif
 
 /* Linux enum tcp_state values. */
@@ -831,29 +835,29 @@ static __always_inline int nd_parse_ipv4_udp(struct __sk_buff *skb,
 
     struct ethhdr *eth = data;
     if ((void *)(eth + 1) > data_end)
-        return TC_ACT_OK;
+        return TC_ACT_UNSPEC;
 
     if (bpf_ntohs(eth->h_proto) != ETH_P_IP)
-        return TC_ACT_OK;
+        return TC_ACT_UNSPEC;
 
     struct iphdr *ip = (void *)(eth + 1);
     if ((void *)(ip + 1) > data_end)
-        return TC_ACT_OK;
+        return TC_ACT_UNSPEC;
 
     if (ip->protocol != IPPROTO_UDP)
-        return TC_ACT_OK;
+        return TC_ACT_UNSPEC;
 
     __u16 frag = bpf_ntohs(ip->frag_off);
     if (frag & ND_IP_MF_OR_OFFSET)
-        return TC_ACT_OK;
+        return TC_ACT_UNSPEC;
 
     __u32 ihl_bytes = (__u32)ip->ihl * 4;
     if (ihl_bytes < sizeof(*ip))
-        return TC_ACT_OK;
+        return TC_ACT_UNSPEC;
 
     struct udphdr *udp = (void *)ip + ihl_bytes;
     if ((void *)(udp + 1) > data_end)
-        return TC_ACT_OK;
+        return TC_ACT_UNSPEC;
 
     __u16 sport = bpf_ntohs(udp->source);
     __u16 dport = bpf_ntohs(udp->dest);
@@ -905,11 +909,11 @@ static __always_inline int nd_parse_ipv4_udp(struct __sk_buff *skb,
     }
 
     if (sport != 53 && dport != 53)
-        return TC_ACT_OK;
+        return TC_ACT_UNSPEC;
 
     struct nd_dns_hdr *dns = (void *)(udp + 1);
     if ((void *)dns + ND_DNS_HDR_LEN > data_end)
-        return TC_ACT_OK;
+        return TC_ACT_UNSPEC;
 
     __u16 txid = bpf_ntohs(dns->id);
     __u16 flags = bpf_ntohs(dns->flags);
@@ -931,7 +935,7 @@ static __always_inline int nd_parse_ipv4_udp(struct __sk_buff *skb,
         };
         nd_inc_dns_counter(0); /* query_total */
         bpf_map_update_elem(&nd_dns_pending, &key, &val, BPF_ANY);
-        return TC_ACT_OK;
+        return TC_ACT_UNSPEC;
     }
 
     if (is_response && sport == 53) {
@@ -976,7 +980,7 @@ static __always_inline int nd_parse_ipv4_udp(struct __sk_buff *skb,
         }
     }
 
-    return TC_ACT_OK;
+    return TC_ACT_UNSPEC;
 }
 
 SEC("tc")
