@@ -30,6 +30,11 @@ func attachTC(iface string, ingressProg, egressProg *ebpf.Program) ([]io.Closer,
 		return nil, fmt.Errorf("find interface: %w", err)
 	}
 
+	// A crashed earlier agent can leave its clsact filters behind. Next to tcx
+	// the egress one would count every packet twice, so remove them first;
+	// the clsact path installs its own filters again.
+	removeStaleFilters(dev)
+
 	closers, mode, err := preferTCX(
 		func() ([]io.Closer, error) { return attachTCX(dev.Attrs().Index, ingressProg, egressProg) },
 		func() ([]io.Closer, error) { return attachClsact(dev.Attrs().Index, ingressProg, egressProg) },
@@ -37,23 +42,20 @@ func attachTC(iface string, ingressProg, egressProg *ebpf.Program) ([]io.Closer,
 	if err != nil {
 		return nil, err
 	}
-	if mode == "tcx" {
-		// A crashed earlier agent can leave its clsact filters behind. The
-		// egress one would still run after tcx and count every packet twice.
-		removeStaleFilters(dev.Attrs().Index)
-	}
 	log.Printf("TC programs attached to %s via %s", iface, mode)
 	return closers, nil
 }
 
-// preferTCX runs tcx and falls back to clsact only when the kernel has no tcx.
+// preferTCX runs tcx and falls back to clsact when tcx fails. Without tcx
+// support that is expected; any other tcx error is logged, because a clsact
+// ingress filter behind another tcx program sees no packets.
 func preferTCX(tcx, clsact func() ([]io.Closer, error)) ([]io.Closer, string, error) {
 	closers, err := tcx()
 	if err == nil {
 		return closers, "tcx", nil
 	}
 	if !errors.Is(err, ebpf.ErrNotSupported) {
-		return nil, "", fmt.Errorf("attach tcx: %w", err)
+		log.Printf("attach tcx failed, falling back to clsact: %v", err)
 	}
 	closers, err = clsact()
 	if err != nil {
@@ -116,33 +118,35 @@ func attachClsact(linkIndex int, ingressProg, egressProg *ebpf.Program) ([]io.Cl
 }
 
 // removeStaleFilters deletes NetworkDoctor clsact filters left on the device.
-// Failures are logged: the qdisc may simply not exist.
-func removeStaleFilters(linkIndex int) {
-	dev, err := netlink.LinkByIndex(linkIndex)
-	if err != nil {
-		return
-	}
+// A device without a clsact qdisc has nothing to remove; other failures are
+// logged.
+func removeStaleFilters(dev netlink.Link) {
 	for _, parent := range []uint32{netlink.HANDLE_MIN_INGRESS, netlink.HANDLE_MIN_EGRESS} {
 		filters, err := netlink.FilterList(dev, parent)
 		if err != nil {
+			if !isNotFound(err) && !errors.Is(err, unix.EINVAL) {
+				log.Printf("list clsact filters: %v", err)
+			}
 			continue
 		}
 		for _, f := range staleNDFilters(filters) {
-			if err := netlink.FilterDel(f); err != nil && !isNotFound(err) {
-				log.Printf("remove stale filter %s: %v", f.(*netlink.BpfFilter).Name, err)
+			if err := netlink.FilterDel(f); err != nil {
+				if !isNotFound(err) {
+					log.Printf("remove stale filter %s: %v", f.Name, err)
+				}
 				continue
 			}
-			log.Printf("removed stale clsact filter %s", f.(*netlink.BpfFilter).Name)
+			log.Printf("removed stale clsact filter %s", f.Name)
 		}
 	}
 }
 
 // staleNDFilters returns the BPF filters that NetworkDoctor installed.
-func staleNDFilters(filters []netlink.Filter) []netlink.Filter {
-	var out []netlink.Filter
+func staleNDFilters(filters []netlink.Filter) []*netlink.BpfFilter {
+	var out []*netlink.BpfFilter
 	for _, f := range filters {
 		if bf, ok := f.(*netlink.BpfFilter); ok && strings.HasPrefix(bf.Name, "nd_tc_") {
-			out = append(out, f)
+			out = append(out, bf)
 		}
 	}
 	return out
