@@ -3,25 +3,97 @@
 package bpf
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"log"
+	"strings"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
 
-// attachTC installs a clsact qdisc and replaces ingress/egress BPF filters on
-// the requested network interface.
+// attachTC attaches the ingress/egress programs to the requested network
+// interface. It prefers tcx (Linux 6.6+) and falls back to clsact filters on
+// older kernels.
+//
+// tcx is needed when another tcx program shares the device: the kernel runs
+// clsact filters only if every tcx program returned TC_ACT_UNSPEC, and Cilium's
+// cil_from_netdev returns TC_ACT_OK, so a clsact ingress filter behind it never
+// runs. The programs go to the head of the tcx chain and return TC_ACT_UNSPEC,
+// so the packet continues to the programs behind them.
 func attachTC(iface string, ingressProg, egressProg *ebpf.Program) ([]io.Closer, error) {
 	dev, err := netlink.LinkByName(iface)
 	if err != nil {
 		return nil, fmt.Errorf("find interface: %w", err)
 	}
 
+	// A crashed earlier agent can leave its clsact filters behind. Next to tcx
+	// the egress one would count every packet twice, so remove them first;
+	// the clsact path installs its own filters again.
+	removeStaleFilters(dev)
+
+	closers, mode, err := preferTCX(
+		func() ([]io.Closer, error) { return attachTCX(dev.Attrs().Index, ingressProg, egressProg) },
+		func() ([]io.Closer, error) { return attachClsact(dev.Attrs().Index, ingressProg, egressProg) },
+	)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("TC programs attached to %s via %s", iface, mode)
+	return closers, nil
+}
+
+// preferTCX runs tcx and falls back to clsact when tcx fails. Without tcx
+// support that is expected; any other tcx error is logged, because a clsact
+// ingress filter behind another tcx program sees no packets.
+func preferTCX(tcx, clsact func() ([]io.Closer, error)) ([]io.Closer, string, error) {
+	closers, err := tcx()
+	if err == nil {
+		return closers, "tcx", nil
+	}
+	if !errors.Is(err, ebpf.ErrNotSupported) {
+		log.Printf("attach tcx failed, falling back to clsact: %v", err)
+	}
+	closers, err = clsact()
+	if err != nil {
+		return nil, "", err
+	}
+	return closers, "clsact", nil
+}
+
+// attachTCX attaches both programs at the head of the device's tcx chains.
+func attachTCX(linkIndex int, ingressProg, egressProg *ebpf.Program) ([]io.Closer, error) {
+	var closers []io.Closer
+	for _, hook := range []struct {
+		prog   *ebpf.Program
+		attach ebpf.AttachType
+	}{
+		{ingressProg, ebpf.AttachTCXIngress},
+		{egressProg, ebpf.AttachTCXEgress},
+	} {
+		l, err := link.AttachTCX(link.TCXOptions{
+			Interface: linkIndex,
+			Program:   hook.prog,
+			Attach:    hook.attach,
+			Anchor:    link.Head(),
+		})
+		if err != nil {
+			closeAll(closers)
+			return nil, err
+		}
+		closers = append(closers, l)
+	}
+	return closers, nil
+}
+
+// attachClsact installs a clsact qdisc and replaces ingress/egress BPF filters.
+func attachClsact(linkIndex int, ingressProg, egressProg *ebpf.Program) ([]io.Closer, error) {
 	qdisc := &netlink.Clsact{
 		QdiscAttrs: netlink.QdiscAttrs{
-			LinkIndex: dev.Attrs().Index,
+			LinkIndex: linkIndex,
 			Handle:    netlink.MakeHandle(0xffff, 0),
 			Parent:    netlink.HANDLE_CLSACT,
 		},
@@ -30,8 +102,8 @@ func attachTC(iface string, ingressProg, egressProg *ebpf.Program) ([]io.Closer,
 		return nil, fmt.Errorf("add clsact qdisc: %w", err)
 	}
 
-	ingress := tcFilter(dev.Attrs().Index, netlink.HANDLE_MIN_INGRESS, 1, "nd_tc_ingress", ingressProg)
-	egress := tcFilter(dev.Attrs().Index, netlink.HANDLE_MIN_EGRESS, 1, "nd_tc_egress", egressProg)
+	ingress := tcFilter(linkIndex, netlink.HANDLE_MIN_INGRESS, 1, "nd_tc_ingress", ingressProg)
+	egress := tcFilter(linkIndex, netlink.HANDLE_MIN_EGRESS, 1, "nd_tc_egress", egressProg)
 
 	for _, filter := range []*netlink.BpfFilter{ingress, egress} {
 		if err := netlink.FilterReplace(filter); err != nil {
@@ -43,6 +115,41 @@ func attachTC(iface string, ingressProg, egressProg *ebpf.Program) ([]io.Closer,
 		tcFilterCloser{filter: ingress},
 		tcFilterCloser{filter: egress},
 	}, nil
+}
+
+// removeStaleFilters deletes NetworkDoctor clsact filters left on the device.
+// A device without a clsact qdisc has nothing to remove; other failures are
+// logged.
+func removeStaleFilters(dev netlink.Link) {
+	for _, parent := range []uint32{netlink.HANDLE_MIN_INGRESS, netlink.HANDLE_MIN_EGRESS} {
+		filters, err := netlink.FilterList(dev, parent)
+		if err != nil {
+			if !isNotFound(err) && !errors.Is(err, unix.EINVAL) {
+				log.Printf("list clsact filters: %v", err)
+			}
+			continue
+		}
+		for _, f := range staleNDFilters(filters) {
+			if err := netlink.FilterDel(f); err != nil {
+				if !isNotFound(err) {
+					log.Printf("remove stale filter %s: %v", f.Name, err)
+				}
+				continue
+			}
+			log.Printf("removed stale clsact filter %s", f.Name)
+		}
+	}
+}
+
+// staleNDFilters returns the BPF filters that NetworkDoctor installed.
+func staleNDFilters(filters []netlink.Filter) []*netlink.BpfFilter {
+	var out []*netlink.BpfFilter
+	for _, f := range filters {
+		if bf, ok := f.(*netlink.BpfFilter); ok && strings.HasPrefix(bf.Name, "nd_tc_") {
+			out = append(out, bf)
+		}
+	}
+	return out
 }
 
 // tcFilter builds a direct-action BPF filter. Direct action means the BPF
